@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import ast
+import importlib
 import re
 from pathlib import Path
 
@@ -141,6 +142,12 @@ def test_pure_layers_stay_pure(py: Path):
         f"{_rel(py)} 属于纯判断层，禁止引用 {sorted(banned)}"
         "（纯函数要求：同样输入同样输出、不碰时间与 I/O）"
     )
+
+
+@pytest.mark.parametrize("layer", sorted(ALLOWED_LAYER_DEPS), ids=str)
+def test_layer_api_windows_import_cleanly(layer: str):
+    """每层窗口都必须能干净导入——骨架文件里的 import 写错也要当场暴露。"""
+    importlib.import_module(f"vidrecap.{layer}.api")
 
 
 def test_agents_md_lists_only_existing_files():

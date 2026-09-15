@@ -88,3 +88,48 @@ class PipelineConfig(BaseModel):
         if self.overlap_seconds >= self.shard_seconds:
             raise ValueError("overlap_seconds must be smaller than shard_seconds")
         return self
+
+
+class SentenceScore(BaseModel):
+    """一句话的质量评分：三个分项 + 加权总分 + 扣分原因。
+
+    分项与总分都在 0~1 之间；reasons 记录扣分原因，供成绩单与排查使用。
+    """
+
+    sentence: str = ""
+    clarity: float = Field(ge=0, le=1)
+    fluency: float = Field(ge=0, le=1)
+    completeness: float = Field(ge=0, le=1)
+    total: float = Field(ge=0, le=1)
+    reasons: list[str] = Field(default_factory=list)
+
+
+class QualityConfig(BaseModel):
+    """质量打分与语义修正的可调参数：默认值只在本类声明一次。"""
+
+    clarity_weight: float = Field(default=0.5, ge=0, le=1, description="清晰度权重")
+    fluency_weight: float = Field(default=0.3, ge=0, le=1, description="通顺度权重")
+    completeness_weight: float = Field(default=0.2, ge=0, le=1, description="完整度权重")
+    threshold: float = Field(default=0.7, gt=0, le=1, description="低于此分触发修正")
+
+    @model_validator(mode="after")
+    def _weights_must_sum_to_one(self) -> "QualityConfig":
+        total = self.clarity_weight + self.fluency_weight + self.completeness_weight
+        if abs(total - 1.0) > 1e-6:
+            raise ValueError("三个指标的权重之和必须等于 1")
+        return self
+
+
+class CorrectionTarget(BaseModel):
+    """计划要修正的一句话。"""
+
+    index: int
+    sentence: str
+    score: float
+    reason: str = ""
+
+
+class CorrectionPlan(BaseModel):
+    """修正计划（规划层产出、服务层执行）：修哪几句、为什么。"""
+
+    targets: list[CorrectionTarget] = Field(default_factory=list)

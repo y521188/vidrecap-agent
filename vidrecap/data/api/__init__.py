@@ -5,18 +5,26 @@
 
 from vidrecap.data.models import (
     CompressionStep,
+    CorrectionPlan,
+    CorrectionTarget,
     PartialSummary,
     PipelineConfig,
+    QualityConfig,
     RecapResult,
     RecapStats,
+    SentenceScore,
     Shard,
 )
 
 __all__ = [
     "CompressionStep",
+    "CorrectionPlan",
+    "CorrectionTarget",
     "PartialSummary",
     "PipelineConfig",
+    "QualityConfig",
     "RecapResult",
     "RecapStats",
+    "SentenceScore",
     "Shard",
 ]

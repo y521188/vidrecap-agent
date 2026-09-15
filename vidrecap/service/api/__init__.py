@@ -6,7 +6,15 @@ ProgressCallback 回调类型也在这里挂出——它是服务层对外的承
 """
 
 from vidrecap.service.compressor import compress
+from vidrecap.service.corrector import apply_corrections
 from vidrecap.service.orchestrator import Orchestrator, ProgressCallback, run_recap
 from vidrecap.service.sharder import shard
 
-__all__ = ["Orchestrator", "ProgressCallback", "compress", "run_recap", "shard"]
+__all__ = [
+    "Orchestrator",
+    "ProgressCallback",
+    "apply_corrections",
+    "compress",
+    "run_recap",
+    "shard",
+]

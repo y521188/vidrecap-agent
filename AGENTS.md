@@ -24,9 +24,14 @@
    `from vidrecap.planning.windows import ...` ❌（绕过窗口直闯内部，CI 会红）。
 2. **规划层只规划、服务层只修改**：规划层产出计划（纯数据），服务层照计划执行；
    执行中发现情况变了，回去找规划层要下一步计划，**不许在服务层里内联发明策略**。
-3. **可调参数的默认值只在 `data/models.py` 的 `PipelineConfig` 声明一次**，
+3. **可调参数的默认值只在 `data/models.py` 的 `PipelineConfig` / `QualityConfig` 声明一次**，
    其他地方只做覆盖，不许再抄一遍数字。
 4. **新增功能先在第 4 节的归属表里找到自己的层，再动手写代码**。
+5. **数据模型归属**：跨层共享的模型放数据层；只在本层内部流转的结构留本层
+   （例如评测用例、成绩单住在 `monitor/evals/schemas.py`）。
+6. **契约先行**：插座（Protocol）与数据模型可以先于实现落地；
+   骨架函数体写 `raise NotImplementedError("待第 N 次提交实现：…")`，
+   并在 [docs/ROADMAP.md](docs/ROADMAP.md) 里登记属于哪次提交。
 
 ---
 
@@ -52,11 +57,16 @@
 | 装配具体适配器（决定用哪个模型/媒体源） | 用户层（唯一装配根） | `user/cli.py` |
 | 任务级入口、并行调度、增量摘要、失败重试 | 服务层 | `service/orchestrator.py` |
 | 按窗取内容、递归调模型这类"动作" | 服务层 | `service/sharder.py`、`service/compressor.py` |
-| 时间窗怎么切、文本怎么拆、修哪些句子 | 规划层 | `planning/windows.py`、`planning/splits.py` |
-| 质量打分规则、阈值闸门、防幻觉护栏 | 规则层 | `rules/`（窗口 `rules.api`） |
-| 数据模型、计划对象、可调参数 | 数据层 | `data/models.py` |
+| 修正执行（打分→修正→重打分→护栏→回退） | 服务层 | `service/corrector.py` |
+| 时间窗怎么切、文本怎么拆 | 规划层 | `planning/windows.py`、`planning/splits.py`、`planning/sentences.py` |
+| 该修哪几句、怎么挑 | 规划层 | `planning/corrections.py` |
+| 质量打分规则 | 规则层 | `rules/quality.py` |
+| 防幻觉护栏 | 规则层 | `rules/guardrail.py` |
+| 评测基线门槛（最低可接受标准） | 规则层 | `rules/baselines.py` |
+| 数据模型、计划对象、可调参数（跨层共享） | 数据层 | `data/models.py` |
 | 真实大模型 / ASR / 字幕文件的接入 | 外部层 | `external/adapters/<厂商>/` |
-| 统计收集、评测集与跑分、CI 基线门槛 | 监控层 | `monitor/`（窗口 `monitor.api`） |
+| 插座接口（新增一类外部能力） | 外部层 | `external/protocols.py` |
+| 考卷数据、加载、指标、跑分 | 监控层 | `monitor/evals/`（用例结构留本层 `schemas.py`） |
 | 将来的 gRPC / HTTP 服务端 | 用户层 | `user/`（新子目录） |
 | 任务持久化、断点续跑 | 数据层 | `data/`（新模块） |
 
@@ -70,6 +80,7 @@
 |---|---|---|
 | `plan_windows` | `shard` | 切时间窗 → 按窗取内容组装分片 |
 | `plan_compression` | `compress` | 单步决定放行/拆分 → 递归执行并调模型 |
+| `split_sentences` + `plan_corrections` | `apply_corrections` | 拆句并挑出低分句 → 调修正器、重打分、过护栏、回退 |
 
 ---
 
@@ -116,12 +127,18 @@ vidrecap/service/api/__init__.py
 vidrecap/service/orchestrator.py
 vidrecap/service/sharder.py
 vidrecap/service/compressor.py
+vidrecap/service/corrector.py
 vidrecap/planning/__init__.py
 vidrecap/planning/api/__init__.py
 vidrecap/planning/windows.py
 vidrecap/planning/splits.py
+vidrecap/planning/sentences.py
+vidrecap/planning/corrections.py
 vidrecap/rules/__init__.py
 vidrecap/rules/api/__init__.py
+vidrecap/rules/quality.py
+vidrecap/rules/guardrail.py
+vidrecap/rules/baselines.py
 vidrecap/data/__init__.py
 vidrecap/data/api/__init__.py
 vidrecap/data/models.py
@@ -132,8 +149,14 @@ vidrecap/external/adapters/__init__.py
 vidrecap/external/adapters/demo/__init__.py
 vidrecap/external/adapters/demo/llm.py
 vidrecap/external/adapters/demo/source.py
+vidrecap/external/adapters/demo/corrector.py
 vidrecap/monitor/__init__.py
 vidrecap/monitor/api/__init__.py
+vidrecap/monitor/evals/__init__.py
+vidrecap/monitor/evals/schemas.py
+vidrecap/monitor/evals/loader.py
+vidrecap/monitor/evals/metrics.py
+vidrecap/monitor/evals/runner.py
 <!-- files:end -->
 
 ---
@@ -165,8 +188,15 @@ vidrecap/monitor/api/__init__.py
 
 ## 11. 当前状态
 
-已完成：七层骨架、时间窗规划、二分递归压缩、并行调度与增量摘要、离线 demo、分层 CI 检查。
+已完成：七层骨架与窗口、时间窗规划、二分递归压缩、并行调度与增量摘要、离线 demo、
+分层 CI 硬检查（跨层引用、窗口纯净、纯判断层、文档清单新鲜度、窗口可导入）。
 
-进行中（下一步）：摘要质量打分器（三指标 + 0.7 闸门）→ 评测集与跑分 → 语义修正（含防幻觉护栏）→ demo 注毒与端到端评测。
+骨架已就位、待填实现：`rules/quality.py`（打分器）、`rules/guardrail.py`（护栏）、
+`planning/sentences.py` 与 `planning/corrections.py`、`service/corrector.py`、
+`external/adapters/demo/corrector.py`、`monitor/evals/`（考卷、加载器、指标、跑分器）。
+骨架函数体一律是 `raise NotImplementedError("待第 N 次提交实现：…")`。
 
-路线图：真实大模型适配器、SRT/ASR 媒体源、失败重试与降级、任务持久化、gRPC 服务化。
+**下一步做什么、验收标准是什么，看 [docs/ROADMAP.md](docs/ROADMAP.md)**：
+提交 1 打分器 → 提交 2 考卷与跑分 → 提交 3 语义修正 → 提交 4 注毒与端到端。
+
+更远：真实大模型适配器、SRT/ASR 媒体源、失败重试与降级、任务持久化、gRPC 服务化。

@@ -4,7 +4,20 @@
 external/protocols.py，不在窗口里。
 """
 
-from vidrecap.external.adapters.demo import DemoLLM, DemoSource
-from vidrecap.external.protocols import LLMClient, MediaSource
+from vidrecap.external.adapters.demo import DemoCorrector, DemoLLM, DemoSource
+from vidrecap.external.protocols import (
+    LLMClient,
+    MediaSource,
+    QualityScorer,
+    SentenceCorrector,
+)
 
-__all__ = ["DemoLLM", "DemoSource", "LLMClient", "MediaSource"]
+__all__ = [
+    "DemoCorrector",
+    "DemoLLM",
+    "DemoSource",
+    "LLMClient",
+    "MediaSource",
+    "QualityScorer",
+    "SentenceCorrector",
+]

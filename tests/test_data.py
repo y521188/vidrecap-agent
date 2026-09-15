@@ -2,7 +2,7 @@
 
 import pytest
 
-from vidrecap.data.api import CompressionStep, PipelineConfig
+from vidrecap.data.api import CompressionStep, PipelineConfig, QualityConfig, SentenceScore
 
 
 def test_defaults_live_in_one_place():
@@ -36,3 +36,37 @@ def test_compression_step_carries_planned_text():
     step = CompressionStep(action="pass", left="原文")
     assert step.left == "原文"
     assert step.right == ""
+
+
+def test_quality_defaults_match_the_agreed_weights():
+    cfg = QualityConfig()
+    assert cfg.clarity_weight == 0.5
+    assert cfg.fluency_weight == 0.3
+    assert cfg.completeness_weight == 0.2
+    assert cfg.threshold == 0.7
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"clarity_weight": 0.5, "fluency_weight": 0.5, "completeness_weight": 0.5},
+        {"threshold": 0},
+        {"threshold": 1.5},
+    ],
+)
+def test_invalid_quality_config_rejected(kwargs):
+    with pytest.raises(ValueError):
+        QualityConfig(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"clarity": 1.5, "fluency": 0.5, "completeness": 0.5, "total": 0.5},
+        {"clarity": 0.5, "fluency": -0.1, "completeness": 0.5, "total": 0.5},
+        {"clarity": 0.5, "fluency": 0.5, "completeness": 0.5, "total": 2.0},
+    ],
+)
+def test_sentence_score_stays_in_range(kwargs):
+    with pytest.raises(ValueError):
+        SentenceScore(**kwargs)
