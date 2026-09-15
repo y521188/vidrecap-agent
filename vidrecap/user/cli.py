@@ -1,7 +1,11 @@
-"""命令行入口。
+"""命令行实现。
 
 零依赖体验：python -m vidrecap demo
 （使用内置离线假数据，不需要任何 API Key）
+
+本文件是"装配根"：具体用哪个适配器、参数怎么给，只在这里组装一次；
+命令行只做参数覆盖，不重复声明默认值（默认值在数据层的 PipelineConfig）。
+对外入口由 user/api 窗口挂出。
 """
 
 from __future__ import annotations
@@ -9,8 +13,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 
-from .adapters.demo import DemoLLM, DemoSource
-from .core.orchestrator import Orchestrator
+from vidrecap.data.api import PipelineConfig
+from vidrecap.external.api import DemoLLM, DemoSource
+from vidrecap.service.api import ProgressCallback, run_recap
 
 
 def _bar(done: int, total: int, width: int = 28) -> str:
@@ -26,13 +31,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     demo = sub.add_parser("demo", help="用内置离线假数据跑通全流程")
     demo.add_argument("--hours", type=float, default=3.0, help="模拟视频时长（小时）")
-    demo.add_argument("--shard-seconds", type=float, default=600.0, help="分片时长（秒）")
-    demo.add_argument("--overlap-seconds", type=float, default=30.0, help="重叠缓冲区（秒）")
+    demo.add_argument(
+        "--shard-seconds", type=float, default=600.0, help="分片时长（秒）"
+    )
+    demo.add_argument(
+        "--overlap-seconds", type=float, default=30.0, help="重叠缓冲区（秒）"
+    )
     demo.add_argument("--concurrency", type=int, default=4, help="并行度")
     demo.add_argument(
         "--context-limit", type=int, default=1200, help="上下文字符上限，超限触发二分递归压缩"
     )
     return parser
+
+
+def _build_config(args: argparse.Namespace) -> PipelineConfig:
+    """把命令行参数覆盖到配置上（未给的字段沿用配置里的默认值）。"""
+    return PipelineConfig(
+        shard_seconds=args.shard_seconds,
+        overlap_seconds=args.overlap_seconds,
+        max_concurrency=args.concurrency,
+        context_limit=args.context_limit,
+    )
 
 
 async def run_demo(args: argparse.Namespace) -> None:
@@ -41,15 +60,15 @@ async def run_demo(args: argparse.Namespace) -> None:
         f"重叠缓冲 {args.overlap_seconds:.0f}s | 并行 {args.concurrency} | "
         f"上下文上限 {args.context_limit} 字符"
     )
-    orchestrator = Orchestrator(
-        DemoLLM(),
-        shard_seconds=args.shard_seconds,
-        overlap_seconds=args.overlap_seconds,
-        max_concurrency=args.concurrency,
-        context_limit=args.context_limit,
-        on_progress=lambda done, total: print(f"\r{_bar(done, total)}", end="", flush=True),
+    on_progress: ProgressCallback = lambda done, total: print(  # noqa: E731
+        f"\r{_bar(done, total)}", end="", flush=True
     )
-    result = await orchestrator.run(DemoSource(hours=args.hours))
+    result = await run_recap(
+        DemoSource(hours=args.hours),
+        DemoLLM(),
+        _build_config(args),
+        on_progress=on_progress,
+    )
     print("\n")
 
     if result.incremental_recap:

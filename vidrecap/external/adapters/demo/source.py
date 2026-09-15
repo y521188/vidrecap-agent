@@ -37,7 +37,9 @@ class DemoSource:
         return self._duration
 
     def _sentence(self, i: int) -> str:
-        # 每句话的随机源只取决于句子的序号，保证内容稳定可复现
+        # 每句话的随机源只取决于句子的序号，保证内容稳定可复现。
+        # 这里刻意使用非加密随机数：demo 需要确定性输出，不用于任何安全用途，
+        # 换成 secrets 反而会让结果不可复现、测试失去意义。
         rng = random.Random((i * 2654435761) % (2**32))
         return (
             f"第{i + 1}段：{rng.choice(_SUBJECTS)}{rng.choice(_VERBS)}"
@@ -46,5 +48,8 @@ class DemoSource:
 
     def content(self, start: float, end: float) -> str:
         first = int(start // SENTENCE_SECONDS)
-        last = min(int(math.ceil(end / SENTENCE_SECONDS)), int(math.ceil(self._duration / SENTENCE_SECONDS)))
+        last = min(
+            int(math.ceil(end / SENTENCE_SECONDS)),
+            int(math.ceil(self._duration / SENTENCE_SECONDS)),
+        )
         return "".join(self._sentence(i) for i in range(first, last))

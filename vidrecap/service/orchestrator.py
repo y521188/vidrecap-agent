@@ -1,4 +1,8 @@
-"""主调度器：并行派发分片、进度回调、80% 增量摘要、最终语义融合。"""
+"""主调度器：并行派发分片、进度回调、80% 增量摘要、最终语义融合。
+
+本层只负责执行：参数从数据层的 PipelineConfig 来，分片窗口从规划层来，
+压缩也交给规划层决策 + 本层递归。这里没有任何"策略数字"。
+"""
 
 from __future__ import annotations
 
@@ -6,10 +10,10 @@ import asyncio
 import time
 from collections.abc import Callable
 
-from .compressor import compress
-from .models import PartialSummary, RecapResult, RecapStats, Shard
-from .protocols import LLMClient, MediaSource
-from .sharder import shard
+from vidrecap.data.api import PartialSummary, PipelineConfig, RecapResult, RecapStats, Shard
+from vidrecap.external.api import LLMClient, MediaSource
+from vidrecap.service.compressor import compress
+from vidrecap.service.sharder import shard
 
 ProgressCallback = Callable[[int, int], None]
 
@@ -18,35 +22,28 @@ class Orchestrator:
     """驱动一次"长视频 -> 分片并行摘要 -> 全局概括"的完整流程。
 
     on_progress(done, total) 在每个分片完成时被调用，可用来画进度条。
+    回调类型 ProgressCallback 是本层对外承诺的一部分，由调用方（监控层、
+    用户层）实现并注入——服务层不反向依赖它们。
     """
 
     def __init__(
         self,
         llm: LLMClient,
-        shard_seconds: float = 600.0,
-        overlap_seconds: float = 30.0,
-        max_concurrency: int = 8,
-        context_limit: int = 4000,
-        incremental_at: float = 0.8,
+        config: PipelineConfig | None = None,
         on_progress: ProgressCallback | None = None,
     ) -> None:
-        if not 0 < incremental_at <= 1.0:
-            raise ValueError("incremental_at must be in (0, 1.0]")
         self.llm = llm
-        self.shard_seconds = shard_seconds
-        self.overlap_seconds = overlap_seconds
-        self.max_concurrency = max_concurrency
-        self.context_limit = context_limit
-        self.incremental_at = incremental_at
+        self.config = config or PipelineConfig()
         self.on_progress = on_progress
 
     async def run(self, source: MediaSource) -> RecapResult:
-        shards = shard(source, self.shard_seconds, self.overlap_seconds)
+        cfg = self.config
+        shards = shard(source, cfg.shard_seconds, cfg.overlap_seconds)
         total = len(shards)
-        semaphore = asyncio.Semaphore(self.max_concurrency)
+        semaphore = asyncio.Semaphore(cfg.max_concurrency)
         results: dict[int, PartialSummary] = {}
         state = {"done": 0, "incremental_task": None}
-        incremental_target = max(1, round(total * self.incremental_at))
+        incremental_target = max(1, round(total * cfg.incremental_at))
         chars_in = sum(len(s.text) for s in shards)
 
         async def summarize_one(s: Shard) -> PartialSummary:
@@ -80,11 +77,11 @@ class Orchestrator:
         stats = RecapStats(
             duration_sec=source.duration(),
             shard_count=total,
-            shard_seconds=self.shard_seconds,
-            overlap_seconds=self.overlap_seconds,
+            shard_seconds=cfg.shard_seconds,
+            overlap_seconds=cfg.overlap_seconds,
             partial_count=len(partials),
             compression_rounds=rounds,
-            incremental_at=self.incremental_at,
+            incremental_at=cfg.incremental_at,
             chars_in=chars_in,
             chars_out=len(recap),
         )
@@ -92,12 +89,23 @@ class Orchestrator:
             recap=recap, partials=partials, incremental_recap=incremental_recap, stats=stats
         )
 
-    async def _merge(
-        self, partials: list[PartialSummary]
-    ) -> tuple[str, int]:
+    async def _merge(self, partials: list[PartialSummary]) -> tuple[str, int]:
         """按时序拼接局部摘要；超限则交给二分递归压缩收敛。"""
         ordered = sorted(partials, key=lambda p: p.shard_index)
         body = "\n\n".join(
             f"[片段{i + 1}] {p.summary}" for i, p in enumerate(ordered)
         )
-        return await compress(body, self.context_limit, self.llm)
+        return await compress(body, self.config.context_limit, self.llm)
+
+
+async def run_recap(
+    source: MediaSource,
+    llm: LLMClient,
+    config: PipelineConfig | None = None,
+    on_progress: ProgressCallback | None = None,
+) -> RecapResult:
+    """任务级入口：命令行、将来的服务化封装、测试都从这里发起任务。
+
+    三条入口走同一个门，行为才不会各走各的。
+    """
+    return await Orchestrator(llm, config=config, on_progress=on_progress).run(source)

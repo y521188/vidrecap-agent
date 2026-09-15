@@ -1,8 +1,13 @@
-"""二分递归压缩测试：短文本零调用、长文本收敛、递归正确触发。"""
+"""压缩测试：规划层给计划、服务层照计划执行。
+
+分两层验证：plan_compression 只做单步决策（纯函数），compress 负责递归
+执行与调用模型（有 I/O）。
+"""
 
 import pytest
 
-from vidrecap.core.compressor import compress
+from vidrecap.planning.api import plan_compression
+from vidrecap.service.api import compress
 
 
 class ShrinkingLLM:
@@ -19,6 +24,32 @@ class ShrinkingLLM:
 class IdentityLLM:
     async def summarize(self, text: str, instruction: str = "") -> str:
         return text
+
+
+# --- 规划层：只出主意，不执行 ---
+
+
+def test_plan_passes_through_when_within_limit():
+    step = plan_compression("短内容", limit=100)
+    assert step.action == "pass"
+    assert step.left == "短内容"
+
+
+def test_plan_splits_without_losing_text():
+    text = "\n\n".join("内容" * 100 for _ in range(4))
+    step = plan_compression(text, limit=50)
+    assert step.action == "split"
+    assert step.left and step.right
+    # 拆分只搬家不丢字：按拆点原样拼回去就是原文
+    assert step.left + "\n\n" + step.right == text
+
+
+def test_plan_is_deterministic():
+    text = "这是一段很长的内容。" * 100
+    assert plan_compression(text, limit=10) == plan_compression(text, limit=10)
+
+
+# --- 服务层：照计划执行 ---
 
 
 async def test_text_within_limit_passes_through_untouched():

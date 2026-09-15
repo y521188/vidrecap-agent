@@ -12,7 +12,7 @@ _SPLIT_RE = re.compile(r"(?<=[。！？])")
 
 
 class DemoLLM:
-    """实现 core.protocols.LLMClient 接口的离线替身。"""
+    """实现外部层 LLMClient 插座的离线替身。"""
 
     def __init__(self) -> None:
         self.calls = 0

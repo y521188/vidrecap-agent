@@ -1,3 +1,3 @@
-from .cli import main
+from vidrecap.user.api import main
 
 main()

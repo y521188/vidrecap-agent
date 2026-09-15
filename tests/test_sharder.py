@@ -2,7 +2,8 @@
 
 import pytest
 
-from vidrecap.core.sharder import plan_windows, shard
+from vidrecap.planning.api import plan_windows
+from vidrecap.service.api import shard
 
 
 class FakeSource:

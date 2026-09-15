@@ -1,0 +1,10 @@
+"""外部层对外窗口：插座协议与内置适配器都从这里进。
+
+本窗口只做转出（re-export），不写任何逻辑——协议类定义住在
+external/protocols.py，不在窗口里。
+"""
+
+from vidrecap.external.adapters.demo import DemoLLM, DemoSource
+from vidrecap.external.protocols import LLMClient, MediaSource
+
+__all__ = ["DemoLLM", "DemoSource", "LLMClient", "MediaSource"]

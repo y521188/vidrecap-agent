@@ -12,7 +12,8 @@
 - **并行派发 + 并发控制** —— asyncio + 信号量，N 路并发跑满而不打爆上游服务
 - **80% 进度触发增量摘要** —— 大部分分片完成时异步先产出一版"局部回顾"，兼顾时效性
 - **二分递归压缩兜底** —— 局部摘要拼接后超上下文限制时，自动对半拆分、递归精简，保证收敛
-- **零厂商绑定** —— 核心引擎只认接口；`adapters/demo` 提供离线假实现，装完就能跑
+- **零厂商绑定** —— 核心引擎只认接口（`external/api/protocols.py`）；`external/adapters/demo` 提供离线假实现，装完就能跑
+- **七层分离** —— 用户 / 服务 / 规划 / 规则 / 数据 / 外部 / 监控各管一摊，规划只出主意、服务只照做，分层规矩由 CI 强制（见 [AGENTS.md](AGENTS.md)）
 
 ## 快速开始
 
@@ -57,32 +58,34 @@ flowchart LR
 
 ## 工作原理
 
-**1. 柔性分片（`core/sharder.py`）**
+**1. 柔性分片（规划层 `planning/windows.py` 定窗，服务层 `service/sharder.py` 取材）**
 责任区均等、取材带缓冲：第 i 个分片负责 `[i*L, (i+1)*L)`，实际取材 `[i*L-Δ, (i+1)*L+Δ]`。相邻分片在缓冲区里有少量重复内容，换来的是切点附近语义完整——这是用一点冗余成本换摘要连贯性的经典取舍。
 
-**2. 增量摘要（`core/orchestrator.py`）**
+**2. 增量摘要（`service/orchestrator.py`）**
 分片完成数达到总数 80% 时，用已完成的局部摘要异步生成一版增量回顾，不等剩余分片。下游（比如值班编辑）可以先拿到"前 2.4 小时讲了什么"，全片概括随后再覆盖。
 
-**3. 二分递归压缩（`core/compressor.py`）**
+**3. 二分递归压缩（规划层 `planning/splits.py` 决策，服务层 `service/compressor.py` 执行）**
 拼接摘要超过上下文上限时：已装得下 → 原样通过，零成本；装不下 → 按段落对半拆开，两边各自递归收敛，再合并；合并后仍超限 → 交给模型继续压缩，直到塞进去为止（有安全轮次上限）。
 
 ## 项目结构
 
 ```text
 vidrecap/
-├── core/            # 引擎核心（开源）
-│   ├── models.py        # Shard / PartialSummary / RecapResult 数据模型
-│   ├── protocols.py     # MediaSource / LLMClient 能力抽象
-│   ├── sharder.py       # 时序分片 + 重叠缓冲区
-│   ├── compressor.py    # 二分递归压缩
-│   └── orchestrator.py  # 并行调度、增量摘要、最终融合
-├── adapters/
-│   └── demo/        # 离线假实现（开源）：假媒体源 + 抽取式假大模型
-└── cli.py           # 命令行入口
-tests/               # 单元测试 + 调度器集成测试
+├── user/            # 用户层：命令行、将来的服务化入口（装配根）
+├── service/         # 服务层：调度执行、按窗取材、递归压缩
+├── planning/        # 规划层：定窗与拆分决策（纯函数，只出主意不执行）
+├── rules/           # 规则层：打分规则、阈值闸门、护栏 + 项目宪法
+├── data/            # 数据层：模型、计划对象、可调参数 PipelineConfig
+├── external/        # 外部层：插座协议 + 适配器（demo 离线实现在此）
+└── monitor/         # 监控层：统计与评测跑分
+AGENTS.md            # 项目规则（给 agent 的入口，受 CI 检查）
+docs/ARCHITECTURE.md # 架构讲解
+tests/               # 单元测试、集成测试、分层硬检查
 ```
 
-`core/` 与厂商解耦，`adapters/` 承载具体对接——真实的大模型客户端、ASR/OCR 适配器、面向客户系统的服务化封装按需扩展，不影响引擎本身。
+跨层调用只走每层的 `api/` 窗口：`from vidrecap.planning.api import plan_windows`。
+引擎与厂商解耦，`external/adapters/` 承载具体对接——真实的大模型客户端、ASR/OCR 适配器、
+面向客户系统的服务化封装按需扩展，不影响引擎本身。分层规矩与依赖方向见 [AGENTS.md](AGENTS.md)。
 
 ## 路线图
 

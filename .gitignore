@@ -219,3 +219,6 @@ __marimo__/
 
 # local security-scan cache
 .mimosa/
+
+# local agent session artifacts
+.zcode/
