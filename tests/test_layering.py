@@ -26,10 +26,11 @@ AGENTS_MD = REPO_ROOT / "AGENTS.md"
 ARCHITECTURE_MD = REPO_ROOT / "docs" / "ARCHITECTURE.md"
 
 # 每层允许引用的层。跨层引用必须落在对方的 api 窗口上；同层内部自由引用。
+# 规划层可以引用规则层：计划要依据标准（"哪句该修"用的是规则层的达标判定）。
 ALLOWED_LAYER_DEPS: dict[str, set[str]] = {
     "user": {"user", "service", "monitor", "external", "data"},
     "service": {"service", "planning", "rules", "external", "data"},
-    "planning": {"planning", "data"},
+    "planning": {"planning", "rules", "data"},
     "rules": {"rules", "data"},
     "data": {"data"},
     "external": {"external", "data"},
