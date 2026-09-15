@@ -222,3 +222,43 @@ __marimo__/
 
 # local agent session artifacts
 .zcode/
+
+# ===== 以下为本项目专项：本地素材、跑出来的结果、私密配置 =====
+
+# 素材（客户视频/音频/字幕，体量大且含隐私，一律不进库）
+*.mp4
+*.mkv
+*.mov
+*.flv
+*.avi
+*.webm
+*.m4v
+*.wav
+*.mp3
+*.m4a
+*.aac
+*.flac
+*.srt
+*.ass
+*.vtt
+
+# 摘要跑出来的结果（可再现，不必入库）
+out/
+output/
+outputs/
+*.recap.json
+
+# 私密配置与密钥
+.env.*
+!env.example
+*.local
+secrets/
+*.pem
+*.key
+
+# 任务持久化与本地缓存（将来断点续跑用）
+.vidrecap/
+
+# 私有考卷：只进不开源的用例放这里，不进库
+vidrecap/monitor/evals/cases/local/
+vidrecap/monitor/evals/cases/*.local.jsonl
