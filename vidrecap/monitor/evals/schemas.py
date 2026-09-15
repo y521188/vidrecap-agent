@@ -113,3 +113,15 @@ class EvalReport(BaseModel):
     threshold: float
     scorer: ScorerMetrics | None = None
     corrector: CorrectorMetrics | None = None
+
+
+class BaselineCheck(BaseModel):
+    """一条指标与规则层基线的对照结果。"""
+
+    name: str
+    measured: float
+    required: float
+
+    @property
+    def passed(self) -> bool:
+        return self.measured >= self.required

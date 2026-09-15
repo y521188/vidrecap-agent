@@ -143,10 +143,11 @@ _PRONOUN_DENSITY_LIMIT = 0.08
 _PRONOUN_DENSITY_FACTOR = 3.5
 
 _PENALTY_REPEAT_WORD = 0.60
-_PENALTY_REPEAT_FUNCTION_CHAR = 0.40
-_PENALTY_CONSECUTIVE_PUNCTUATION = 0.30
-_PENALTY_RUN_ON = 0.25
-_PENALTY_FRAGMENT = 0.25
+_PENALTY_REPEAT_FUNCTION_CHAR = 0.55
+_PENALTY_CONSECUTIVE_PUNCTUATION = 0.55
+_PENALTY_RUN_ON_SEVERE = 0.55
+_PENALTY_RUN_ON_MILD = 0.25
+_PENALTY_FRAGMENT = 0.55
 _PENALTY_TOO_LONG = 0.20
 
 _PENALTY_TRUNCATED = 0.55
@@ -155,7 +156,17 @@ _PENALTY_NO_PREDICATE = 0.30
 
 FRAGMENT_MAX_CHARS = 6
 RUN_ON_MIN_CHARS = 25
+RUN_ON_SEVERE_CHARS = 40
 LONG_SENTENCE_MIN_CHARS = 80
+
+# 判定口径（重要，改规则前先读这段）：
+# **硬缺陷**——缺主语、指代过密、相邻词重复、虚词重复、标点连用、
+# 被截断、话说一半、碎片、严重连读——扣分都超过 0.5，也就是说
+# 单独命中一条就足以让所在分项跌破下限、触发一票否决。
+# **轻扣**——句子稍长、略短、看不出谓语、轻度连读——只做辅助信号，
+# 单独出现不该把一句还算通顺的话打成不合格。
+# 判断依据：三个指标是加权平均（权重都小于 1），单条扣分若不到 0.5，
+# 加权后根本拉不下总分，那条规则就等于没有闸门作用。
 
 SEVERE_METRIC_FLOOR = 0.5
 """单项严重不合格的下限：任一指标低于它，整句判为需要修正（一票否决）。
@@ -168,7 +179,11 @@ SEVERE_METRIC_FLOOR = 0.5
 
 _WORD_REPEAT_PATTERN = re.compile(r"([\u4e00-\u9fff]{2})\1")
 _FUNCTION_CHAR_REPEAT_PATTERN = re.compile(r"([了的是在和])\1")
-_CONSECUTIVE_PUNCTUATION_PATTERN = re.compile(r"[，。！？、；：,.!?;:]{2,}")
+# 缺陷型连用标点：逗号顿号连排、停顿标点挨着句末标点、连续句号。
+# 不含「！！」「？？」——重复感叹或疑问是强调，不是缺陷。
+_CONSECUTIVE_PUNCTUATION_PATTERN = re.compile(
+    r"[，、；：]{2,}|[，、；：][。！？]|[。！？][，、；：]|。{2,}"
+)
 _PAUSE_PATTERN = re.compile(f"[{PAUSE_PUNCTUATIONS}]")
 
 
@@ -246,13 +261,16 @@ class HeuristicScorer:
             score -= _PENALTY_CONSECUTIVE_PUNCTUATION
             reasons.append("标点连用")
 
-        if len(sentence) > RUN_ON_MIN_CHARS and not _PAUSE_PATTERN.search(sentence):
-            score -= _PENALTY_RUN_ON
-            reasons.append("长句中间没有停顿标点，像没断句的连读")
+        if len(sentence) > RUN_ON_SEVERE_CHARS and not _PAUSE_PATTERN.search(sentence):
+            score -= _PENALTY_RUN_ON_SEVERE
+            reasons.append("严重连读：几十个字中间没有任何停顿标点")
+        elif len(sentence) > RUN_ON_MIN_CHARS and not _PAUSE_PATTERN.search(sentence):
+            score -= _PENALTY_RUN_ON_MILD
+            reasons.append("长句中间没有停顿标点")
 
         if len(sentence) < FRAGMENT_MAX_CHARS:
             score -= _PENALTY_FRAGMENT
-            reasons.append("句子过短，像碎片")
+            reasons.append("碎片：字数太少，不成句子")
         elif len(sentence) > LONG_SENTENCE_MIN_CHARS:
             score -= _PENALTY_TOO_LONG
             reasons.append("句子过长，一句里塞了太多内容")

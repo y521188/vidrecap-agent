@@ -1,0 +1,49 @@
+{"id": "clarity-001", "category": "clarity", "context": "主持人分析了媒体融合趋势，并结合案例给出了详细说明。", "sentence": "介绍了媒体融合趋势，并结合案例给出了详细说明。", "gold": {"passed": false, "note": "缺主语：不知道是谁介绍的"}}
+{"id": "clarity-002", "category": "clarity", "context": "栏目组分析了节目制作流程，认为该方案可以推广。", "sentence": "分析了节目制作流程，认为该方案可以推广。", "gold": {"passed": false, "note": "缺主语：谁分析的、谁认为的"}}
+{"id": "clarity-003", "category": "clarity", "context": "主持人总结了跨年晚会的筹备经验。", "sentence": "总结了跨年晚会的筹备经验。", "gold": {"passed": false, "note": "缺主语"}}
+{"id": "clarity-004", "category": "clarity", "context": "评论员回顾了平台推荐算法的演进过程。", "sentence": "回顾了平台推荐算法的演进过程。", "gold": {"passed": false, "note": "缺主语"}}
+{"id": "clarity-005", "category": "clarity", "context": "主持人说明了节目改版的原因，并回答了现场提问。", "sentence": "他说了那个事情。", "gold": {"passed": false, "note": "指代模糊：他是谁、那个事情是哪件事都不清楚"}}
+{"id": "clarity-006", "category": "clarity", "context": "栏目组和嘉宾讨论了改版方案，随后又谈到了播出排期。", "sentence": "他们讨论了这个，然后又说那个。", "gold": {"passed": false, "note": "指代过密：三个指代词，指不明白"}}
+{"id": "clarity-007", "category": "clarity", "context": "节目组决定重拍开场和结尾两段素材。", "sentence": "这个和那个都需要重新拍。", "gold": {"passed": false, "note": "指代过密：哪两段不清楚"}}
+{"id": "clarity-008", "category": "clarity", "context": "主持人提到了三个改版方向，但没有展开说明具体细节。", "sentence": "他提到了这些，但没有说明具体是哪些。", "gold": {"passed": false, "note": "指代过密：这些和哪些都无所指"}}
+{"id": "clarity-009", "category": "clarity", "context": "主持人介绍了节目制作流程，并说明了审核标准。", "sentence": "主持人介绍了节目制作流程，并说明了审核标准。", "gold": {"passed": true, "note": "主语清楚、无指代歧义"}}
+{"id": "clarity-010", "category": "clarity", "context": "现场记者回顾了跨年晚会的筹备过程，并采访了三位参与者。", "sentence": "现场记者回顾了跨年晚会的筹备过程，并采访了三位参与者。", "gold": {"passed": true}}
+{"id": "clarity-011", "category": "clarity", "context": "数据分析师指出，推荐算法的调整带来了明显变化。", "sentence": "数据分析师指出，推荐算法的调整带来了明显变化。", "gold": {"passed": true}}
+{"id": "clarity-012", "category": "clarity", "context": "栏目组总结了今年跨年晚会的三个亮点。", "sentence": "栏目组总结了今年跨年晚会的三个亮点。", "gold": {"passed": true}}
+{"id": "fluency-001", "category": "fluency", "context": "栏目组介绍了节目制作流程，并结合案例给出了详细说明。", "sentence": "栏目组介绍介绍了节目制作流程。", "gold": {"passed": false, "note": "相邻字词重复：介绍介绍"}}
+{"id": "fluency-002", "category": "fluency", "context": "主持人分析了媒体融合趋势。", "sentence": "主持人分析了了媒体融合趋势。", "gold": {"passed": false, "note": "虚词重复：了了"}}
+{"id": "fluency-003", "category": "fluency", "context": "栏目组回顾了节目制作流程。", "sentence": "栏目组回顾了节目制作流程。。", "gold": {"passed": false, "note": "标点连用：连续两个句号"}}
+{"id": "fluency-004", "category": "fluency", "context": "主持人介绍了节目流程，然后总结了经验。", "sentence": "主持人介绍了节目流程，。然后总结了经验。", "gold": {"passed": false, "note": "标点连用：逗号紧接着句号"}}
+{"id": "fluency-005", "category": "fluency", "context": "节目还有一部分内容需要补充说明。", "sentence": "此外。", "gold": {"passed": false, "note": "碎片：三个字不成句"}}
+{"id": "fluency-006", "category": "fluency", "context": "栏目组介绍了节目制作流程并结合案例给出了详细说明，还提出了三条改进建议，最后回答了现场观众关于内容审核标准的提问。", "sentence": "栏目组介绍了节目制作流程并结合案例给出了详细说明还提出了三条改进建议最后回答了现场观众关于内容审核标准的提问。", "gold": {"passed": false, "note": "严重连读：五十多字中间没有任何停顿标点"}}
+{"id": "fluency-007", "category": "fluency", "context": "评论员回顾了跨年晚会的筹备过程。", "sentence": "评论员回顾回顾了跨年晚会。", "gold": {"passed": false, "note": "相邻字词重复：回顾回顾"}}
+{"id": "fluency-008", "category": "fluency", "context": "现场记者采访了参与筹备的工作人员。", "sentence": "现场记者采访采访了工作人员。", "gold": {"passed": false, "note": "相邻字词重复：采访采访"}}
+{"id": "fluency-009", "category": "fluency", "context": "主持人总结了节目制作流程，并回答了现场提问。", "sentence": "主持人总结了节目制作流程，并回答了现场提问。", "gold": {"passed": true}}
+{"id": "fluency-010", "category": "fluency", "context": "评论员回顾了跨年晚会的筹备过程，并分析了三个关键环节。", "sentence": "评论员回顾了跨年晚会的筹备过程，并分析了三个关键环节。", "gold": {"passed": true}}
+{"id": "fluency-011", "category": "fluency", "context": "受访观众表示，节目的互动环节设计得很有意思。", "sentence": "受访观众表示，节目的互动环节设计得很有意思。", "gold": {"passed": true}}
+{"id": "fluency-012", "category": "fluency", "context": "栏目组介绍了今年跨年晚会的整体安排。", "sentence": "栏目组介绍了今年跨年晚会的整体安排。", "gold": {"passed": true}}
+{"id": "completeness-001", "category": "completeness", "context": "栏目组介绍了节目制作流程，并回答了现场提问。", "sentence": "栏目组介绍了节目制作流程", "gold": {"passed": false, "note": "被截断：结尾没有标点收尾"}}
+{"id": "completeness-002", "category": "completeness", "context": "主持人回顾了跨年晚会的筹备过程。", "sentence": "主持人回顾了跨年晚会的筹备过程", "gold": {"passed": false, "note": "被截断"}}
+{"id": "completeness-003", "category": "completeness", "context": "数据分析师指出了三个关键变化。", "sentence": "数据分析师指出了三个关键变化", "gold": {"passed": false, "note": "被截断"}}
+{"id": "completeness-004", "category": "completeness", "context": "现场记者采访了参与筹备的工作人员。", "sentence": "现场记者采访了参与筹备的工作人员", "gold": {"passed": false, "note": "被截断"}}
+{"id": "completeness-005", "category": "completeness", "context": "栏目组介绍了节目制作流程，并说明了审核标准。", "sentence": "栏目组介绍了节目制作流程，", "gold": {"passed": false, "note": "话说一半：以逗号结尾"}}
+{"id": "completeness-006", "category": "completeness", "context": "主持人总结了今年的三个亮点：内容、节奏和互动。", "sentence": "主持人总结了今年的三个亮点、", "gold": {"passed": false, "note": "话说一半：以顿号结尾"}}
+{"id": "completeness-007", "category": "completeness", "context": "评论员分析了推荐算法的调整，但还没说完就被打断。", "sentence": "评论员分析了推荐算法的调整，但还没说完", "gold": {"passed": false, "note": "被截断"}}
+{"id": "completeness-008", "category": "completeness", "context": "受访观众表示节目的互动环节很有意思，希望以后多办。", "sentence": "受访观众表示节目的互动环节很有意思，", "gold": {"passed": false, "note": "话说一半"}}
+{"id": "completeness-009", "category": "completeness", "context": "栏目组介绍了节目制作流程，并回答了现场提问。", "sentence": "栏目组介绍了节目制作流程，并回答了现场提问。", "gold": {"passed": true}}
+{"id": "completeness-010", "category": "completeness", "context": "主持人总结了跨年晚会的三个亮点。", "sentence": "主持人总结了跨年晚会的三个亮点。", "gold": {"passed": true}}
+{"id": "completeness-011", "category": "completeness", "context": "现场记者采访了参与晚会筹备的七位工作人员。", "sentence": "现场记者采访了参与晚会筹备的七位工作人员。", "gold": {"passed": true}}
+{"id": "completeness-012", "category": "completeness", "context": "数据分析师分析了推荐算法调整后的用户行为变化。", "sentence": "数据分析师分析了推荐算法调整后的用户行为变化。", "gold": {"passed": true}}
+{"id": "mixed-001", "category": "mixed", "context": "栏目组介绍了媒体融合趋势。", "sentence": "介绍介绍了那个。", "gold": {"passed": false, "note": "缺主语 + 字词重复 + 指代模糊"}}
+{"id": "mixed-002", "category": "mixed", "context": "主持人总结了改版的三个原因。", "sentence": "他总结了了那个事情。", "gold": {"passed": false, "note": "指代模糊 + 虚词重复"}}
+{"id": "mixed-003", "category": "mixed", "context": "评论员回顾了这些变化，然后说到了播出安排。", "sentence": "回顾了这些，然后又说那个", "gold": {"passed": false, "note": "缺主语 + 指代过密 + 被截断"}}
+{"id": "mixed-004", "category": "mixed", "context": "这个节目很有意思，观众反馈很好。", "sentence": "这个这个节目，。很有意思。", "gold": {"passed": false, "note": "指代过密 + 字词重复 + 标点连用"}}
+{"id": "mixed-005", "category": "mixed", "context": "主持人总结了这次活动的三个收获。", "sentence": "总结总结了了这次活动、", "gold": {"passed": false, "note": "缺主语 + 重复 + 话说一半"}}
+{"id": "good-001", "category": "good", "context": "主持人分析了媒体融合趋势，并结合案例给出了详细说明。", "sentence": "主持人分析了媒体融合趋势，并结合案例给出了详细说明。", "gold": {"passed": true}}
+{"id": "good-002", "category": "good", "context": "主持人总结了节目流程。", "sentence": "主持人总结了节目流程。", "gold": {"passed": true, "note": "对抗性样例：很短但完整"}}
+{"id": "good-003", "category": "good", "context": "数据分析师回顾了平台推荐算法，并说明了内容审核标准的变化，同时提出了三条改进建议。", "sentence": "数据分析师回顾了平台推荐算法，并说明了内容审核标准的变化，同时提出了三条改进建议。", "gold": {"passed": true, "note": "对抗性样例：较长但清晰"}}
+{"id": "good-004", "category": "good", "context": "现场记者采访了三位参与跨年晚会筹备的工作人员。", "sentence": "现场记者采访了三位参与跨年晚会筹备的工作人员。", "gold": {"passed": true}}
+{"id": "good-005", "category": "good", "context": "评论员指出，推荐算法的调整带来了用户行为的明显变化。", "sentence": "评论员指出，推荐算法的调整带来了用户行为的明显变化。", "gold": {"passed": true}}
+{"id": "good-006", "category": "good", "context": "栏目组介绍了今年跨年晚会的整体安排，以及三个重点环节。", "sentence": "栏目组介绍了今年跨年晚会的整体安排，以及三个重点环节。", "gold": {"passed": true}}
+{"id": "good-007", "category": "good", "context": "受访观众表示节目内容很贴近日常生活。", "sentence": "受访观众表示节目内容很贴近日常生活。", "gold": {"passed": true}}
+{"id": "good-008", "category": "good", "context": "主持人回应了现场观众的提问，并说明了后续安排。", "sentence": "主持人回应了现场观众的提问，并说明了后续安排。", "gold": {"passed": true}}

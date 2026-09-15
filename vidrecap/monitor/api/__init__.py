@@ -13,8 +13,15 @@ from vidrecap.monitor.evals.metrics import (
     scorer_misses,
     threshold_accuracy,
 )
-from vidrecap.monitor.evals.runner import run_corrector_eval, run_eval, run_scorer_eval
+from vidrecap.monitor.evals.runner import (
+    AVAILABLE_SUITES,
+    baseline_checks,
+    run_corrector_eval,
+    run_eval,
+    run_scorer_eval,
+)
 from vidrecap.monitor.evals.schemas import (
+    BaselineCheck,
     CorrectionOutcome,
     CorrectorCase,
     CorrectorGold,
@@ -26,6 +33,8 @@ from vidrecap.monitor.evals.schemas import (
 )
 
 __all__ = [
+    "AVAILABLE_SUITES",
+    "BaselineCheck",
     "CorrectionOutcome",
     "CorrectorCase",
     "CorrectorGold",
@@ -34,6 +43,7 @@ __all__ = [
     "ScorerCase",
     "ScorerGold",
     "ScorerMetrics",
+    "baseline_checks",
     "corrector_metrics",
     "load_corrector_cases",
     "load_scorer_cases",

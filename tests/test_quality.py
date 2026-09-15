@@ -115,6 +115,19 @@ async def test_pronoun_rule_does_not_flag_words_that_merely_contain_them():
     assert not any("指代" in reason for reason in score.reasons)
 
 
+async def test_known_limitation_short_sentence_with_resolvable_pronoun_is_flagged():
+    """已知局限：短句里出现一次指代就会被判低分，哪怕指代在上下文中其实很清楚。
+
+    因为启发式打分器**看不见上下文**（这是刻意的：它必须确定性、零依赖、可离线复现），
+    只能按指代词密度判断。"他们决定重拍开场。"这类句子会被误判。
+    这个局限留着不修，是因为修它就得引入上下文理解——那属于模型档打分器的活，
+    届时应在这套考卷的同一批题上做对比。此测试锁住现状，避免有人误以为它"已经能处理指代"。
+    """
+    score = await _score("他们决定重拍开场。", context="栏目组和嘉宾讨论后，他们决定重拍开场。")
+    assert score.clarity < SEVERE_METRIC_FLOOR
+    assert not is_acceptable(score)
+
+
 # --- 通顺度 ---
 
 
@@ -141,7 +154,7 @@ async def test_consecutive_punctuation_lowers_fluency():
 async def test_fragment_is_flagged():
     score = await _score("了了。")
     assert score.fluency < 1.0
-    assert any("过短" in reason for reason in score.reasons)
+    assert any("碎片" in reason for reason in score.reasons)
 
 
 # --- 完整度 ---

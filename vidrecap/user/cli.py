@@ -3,8 +3,12 @@
 零依赖体验：python -m vidrecap demo
 （使用内置离线假数据，不需要任何 API Key）
 
+两个命令：
+- ``demo`` 用假数据跑通全流程；
+- ``eval`` 跑评测集出成绩单，低于基线时以非零码退出（可以直接当门禁用）。
+
 本文件是"装配根"：具体用哪个适配器、参数怎么给，只在这里组装一次；
-命令行只做参数覆盖，不重复声明默认值（默认值在数据层的 PipelineConfig）。
+命令行只做参数覆盖，不重复声明默认值（默认值在数据层的两个 Config）。
 对外入口由 user/api 窗口挂出。
 """
 
@@ -12,9 +16,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import sys
 
-from vidrecap.data.api import PipelineConfig
+from vidrecap.data.api import PipelineConfig, QualityConfig
 from vidrecap.external.api import DemoLLM, DemoSource
+from vidrecap.monitor.api import EvalReport, baseline_checks, run_eval
 from vidrecap.service.api import ProgressCallback, run_recap
 
 
@@ -40,6 +46,17 @@ def build_parser() -> argparse.ArgumentParser:
     demo.add_argument("--concurrency", type=int, default=4, help="并行度")
     demo.add_argument(
         "--context-limit", type=int, default=1200, help="上下文字符上限，超限触发二分递归压缩"
+    )
+
+    evaluate = sub.add_parser("eval", help="跑评测集，打印成绩单（低于基线则退出码非零）")
+    evaluate.add_argument(
+        "--suite",
+        choices=["scorer", "corrector", "all"],
+        default="scorer",
+        help="跑哪套考卷（corrector 待第 3 次提交实现）",
+    )
+    evaluate.add_argument(
+        "--threshold", type=float, default=None, help="覆盖判定阈值（默认 0.7）"
     )
     return parser
 
@@ -84,8 +101,52 @@ async def run_demo(args: argparse.Namespace) -> None:
           f"(压缩到 {s.chars_out / max(s.chars_in, 1):.1%})")
 
 
+def _print_report(report: EvalReport) -> bool:
+    """打印成绩单，返回是否达到全部基线。
+
+    基线数值与"谁不达标"的判断都由监控层给出，这里只负责展示。
+    """
+    print("=== 评测成绩单 ===")
+    print(f"考卷: {report.suite} | 判定阈值: {report.threshold:.2f}")
+
+    if report.scorer is not None:
+        metrics = report.scorer
+        print(f"用例数: {metrics.case_count}")
+
+    checks = baseline_checks(report)
+    for check in checks:
+        mark = "✓" if check.passed else "✗ 低于基线"
+        print(f"{check.name}: {check.measured:.1%}   基线 ≥ {check.required:.0%}   {mark}")
+
+    if report.scorer is not None:
+        metrics = report.scorer
+        print(
+            "分类别准确率: "
+            + " | ".join(
+                f"{category} {value:.0%}"
+                for category, value in metrics.per_category_accuracy.items()
+            )
+        )
+        if metrics.misses:
+            print(f"错题 {len(metrics.misses)} 条: " + "、".join(metrics.misses))
+        else:
+            print("错题: 无")
+
+    passed = all(check.passed for check in checks)
+    print("结论: " + ("达到基线 ✓" if passed else "未达基线 ✗"))
+    return passed
+
+
+async def run_eval_command(args: argparse.Namespace) -> int:
+    config = QualityConfig() if args.threshold is None else QualityConfig(threshold=args.threshold)
+    report = await run_eval(args.suite, config)
+    return 0 if _print_report(report) else 1
+
+
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
+    if args.command == "eval":
+        sys.exit(asyncio.run(run_eval_command(args)))
     asyncio.run(run_demo(args))
 
 
