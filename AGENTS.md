@@ -47,6 +47,11 @@
 | 外部层 | 对外窗口：插座协议 + 具体适配器（含离线 demo） | `vidrecap/external/` | `external.api` |
 | 监控层 | 质检与仪表盘：统计、评测跑分、基线门槛 | `vidrecap/monitor/` | `monitor.api` |
 
+**一层一个文件夹**：每层独立成夹，夹里必须有一个 `api/` 窗口；代码不许躺在包根。
+唯一的例外是 `vidrecap/__init__.py` 与 `vidrecap/__main__.py` 两个壳文件——
+Python 与 `python -m vidrecap` 的约定要求它们必须在包根，所以它们只准放入口转发、不准放逻辑。
+这条由 `tests/test_layering.py` 强制：新目录意味着新的一层，得先改本文件。
+
 ---
 
 ## 4. 功能归属表（新代码写哪层）
@@ -164,6 +169,8 @@ vidrecap/monitor/evals/runner.py
 ## 9. 测试与提交
 
 - 跑测试：`.venv/Scripts/python.exe -m pytest -q`（Windows）或 `pytest -q`。
+- **分层硬检查**（`tests/test_layering.py`）会验证：跨层引用只走 api 窗口、窗口只做转出、
+  规划层与规则层保持纯判断、一层一个文件夹、每层窗口能干净导入、本文件的受检清单不过期。
 - **新增功能必须带测试**；修 bug 先写能复现的测试。
 - **行为不变的重构**（搬家、提炼、改名）必须验证：`python -m vidrecap demo` 的输出
   与重构前**逐字节一致**。

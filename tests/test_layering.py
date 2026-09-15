@@ -1,10 +1,12 @@
 """分层规矩的硬检查：把 AGENTS.md 里的约定变成 CI 卡点。
 
-检查四件事：
+检查六件事：
 1. 跨层引用只能走对方的 api 窗口（绕过窗口直闯内部就红）；
 2. api 窗口只做转出，不写逻辑；
 3. 规划层与规则层保持纯函数（禁止时间、随机、I/O 相关模块）；
-4. AGENTS.md 里列出的文件路径必须真实存在（文档不许漂移）。
+4. 一层一个文件夹：每层独立文件夹 + 一个 api 窗口，代码不许躺在包根；
+5. 每层窗口都必须能干净导入（骨架里的 import 写错也要暴露）；
+6. AGENTS.md 里列出的文件路径必须真实存在（文档不许漂移）。
 
 规矩的完整说明见仓库根目录 AGENTS.md（规则层资产）。
 """
@@ -33,6 +35,13 @@ ALLOWED_LAYER_DEPS: dict[str, set[str]] = {
     "external": {"external", "data"},
     "monitor": {"monitor", "service", "rules", "external", "data"},
 }
+
+# 七层的文件夹名（顺序即依赖方向：用户在上，数据在下）
+LAYERS = ("user", "service", "planning", "rules", "data", "external", "monitor")
+
+# 包根只允许这两个壳文件：Python 与 `python -m vidrecap` 的约定要求它们必须在包根，
+# 因此它们是"一层一个文件夹"这条规矩唯一的例外，且只准放入口转发，不准放逻辑。
+ALLOWED_PACKAGE_ROOT_FILES = {"__init__.py", "__main__.py"}
 
 # 规划层与规则层是纯判断：这些模块会引入时钟、随机或 I/O，一律禁止
 PURE_LAYERS = {"planning", "rules"}
@@ -142,6 +151,32 @@ def test_pure_layers_stay_pure(py: Path):
         f"{_rel(py)} 属于纯判断层，禁止引用 {sorted(banned)}"
         "（纯函数要求：同样输入同样输出、不碰时间与 I/O）"
     )
+
+
+@pytest.mark.parametrize("layer", LAYERS, ids=str)
+def test_each_layer_has_its_own_folder_with_a_window(layer: str):
+    """一层一个文件夹：每层独立成夹，夹里必须有一个 api 窗口。"""
+    folder = PACKAGE_ROOT / layer
+    assert folder.is_dir(), f"{layer} 层必须有自己的文件夹"
+    assert (folder / "__init__.py").exists(), f"{layer}/ 缺少 __init__.py"
+    assert (folder / "api" / "__init__.py").exists(), f"{layer}/api/ 窗口缺失"
+
+
+def test_no_source_file_lives_outside_a_layer_folder():
+    """代码必须住在层文件夹里，包根只容得下两个壳文件。"""
+    for py in sorted(PACKAGE_ROOT.glob("*.py")):
+        assert py.name in ALLOWED_PACKAGE_ROOT_FILES, (
+            f"vidrecap/{py.name} 不属于任何层——请放进对应的层文件夹"
+            f"（包根只允许 {sorted(ALLOWED_PACKAGE_ROOT_FILES)} 这两个壳文件）"
+        )
+    for py in _package_files():
+        rel = py.relative_to(PACKAGE_ROOT)
+        if len(rel.parts) == 1:
+            continue
+        assert rel.parts[0] in LAYERS, (
+            f"{py} 的顶层目录 {rel.parts[0]} 不是已知的层——"
+            f"每一层一个文件夹，新目录意味着新的一层，先改 AGENTS.md"
+        )
 
 
 @pytest.mark.parametrize("layer", sorted(ALLOWED_LAYER_DEPS), ids=str)
