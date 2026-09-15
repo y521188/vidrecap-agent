@@ -30,6 +30,10 @@ class HeuristicScorer:
     def __init__(self, config: QualityConfig | None = None) -> None:
         raise NotImplementedError("待第 1 次提交实现：三指标启发式打分器")
 
-    def score(self, sentence: str, context: str) -> SentenceScore:
-        """给一句话打分：三个分项各 0~1，按权重加权得总分。"""
+    async def score(self, sentence: str, context: str) -> SentenceScore:
+        """给一句话打分：三个分项各 0~1，按权重加权得总分。
+
+        异步只是为了对齐插座形状（模型档实现要 await 线程池），
+        这里全是同步纯计算，不引入任何等待。
+        """
         raise NotImplementedError("待第 1 次提交实现：三指标启发式打分器")

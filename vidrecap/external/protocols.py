@@ -41,11 +41,19 @@ class MediaSource(Protocol):
 class QualityScorer(Protocol):
     """质量打分：给一句话和它所在片段的原文，还一个三指标评分。
 
-    必须是同步、确定性的纯判断——不调模型、不读时钟，同样输入永远同样输出，
-    否则评测集失去意义。当前实现是规则层的启发式打分器，将来可换模型实现。
+    打分分两档，别混用：
+
+    - **默认档（规则层的启发式实现）必须确定性**：不调模型、不读时钟、不用随机，
+      同样输入永远同样输出——CI 门槛与评测集靠它复现；
+    - **模型档放外部层适配器**：模型推理有浮点噪声，做不到逐字节复现，
+      所以只在"对比报告"里跑，不进 CI 门槛。
+
+    接口是异步的：慢实现（要跑模型、要读文件）请在自己的适配器里用
+    `asyncio.to_thread` 包一层——**包装由适配器负责**，服务层只管 await，
+    不该知道谁快谁慢。纯启发式实现直接 `async def` 返回即可，没有额外开销。
     """
 
-    def score(self, sentence: str, context: str) -> SentenceScore: ...
+    async def score(self, sentence: str, context: str) -> SentenceScore: ...
 
 
 @runtime_checkable

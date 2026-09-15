@@ -17,7 +17,7 @@ from vidrecap.monitor.evals.schemas import (
 )
 
 
-def run_scorer_eval(
+async def run_scorer_eval(
     scorer: QualityScorer,
     cases: list[ScorerCase] | None = None,
     config: QualityConfig | None = None,
