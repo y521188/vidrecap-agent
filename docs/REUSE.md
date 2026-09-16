@@ -112,3 +112,23 @@ GitHub 代码仓库的许可是两套东西，都要看。
 `scripts/video2recap.py` 实现：默认走 faster-whisper（MIT，含模型权重），
 由使用者按需自装、不进 vidrecap 依赖树；whisper-timestamped（AGPL）不引入。
 脚本只产 SRT，概括链路仍由包内 `SrtSource` + `vidrecap demo` 完成。
+
+---
+
+## 八、阶段三复用清单（2026-09 调研，对应 ROADMAP 提交 9–12）
+
+原则不变：**格式抄标准、模型走外挂、策略自己写**。
+
+| 阶段三组件 | 复用什么 | 许可证结论 | 用法 |
+|---|---|---|---|
+| skill-md 技能配置 | [Agent Skills 开放标准](https://agentskills.io/specification)（SKILL.md + frontmatter + Markdown 正文，2025-12 起开放） | 规范公开出版 | **遵循格式、自写解析**：frontmatter 用受限平铺键值（不引 PyYAML），字段与标准兼容 |
+| 人物标签来源 | [pyannote](https://github.com/pyannote/pyannote-audio)（说话人分离事实标准） | 代码 MIT；模型 HF 门禁，接受协议后免费商用 | 外挂工具（同 faster-whisper 先例），产"谁在何时说话"，不进包依赖 |
+| 说话人+对齐一条龙 | [WhisperX](https://github.com/m-bain/whisperX)（ASR+词级时间戳+分离） | **BSD-4-Clause**（可用，含"不得用作者名义背书"条款）；分离部分实际依赖 pyannote | 备选外挂；许可证比 MIT 多一条注意项 |
+| 场景切换检测 | [PySceneDetect](https://github.com/breakthrough/pyscenedetect) | BSD-3-Clause，完全宽松 | 外挂脚本抽帧加密触发 |
+| 画面识字 | [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) / RapidOCR | 均 Apache-2.0，商用无忧 | 外挂件，中文强 |
+| 画面描述 | 无需复用代码：视觉模型走 OpenAI 兼容 API（Qwen-VL 系） | — | 复用现有 `OpenAICompatibleLLM` 模式加图片消息 |
+| 人物权重策略 | **无可复用项目** | — | 自研卖点：规划层纯函数 + 考卷先行 |
+| Function Calling 骨架 | LiteLLM 等统一网关 | MIT 但违背零依赖铁律 | 不引——现有插座已覆盖 |
+
+不进依赖树的红线照旧（见第七节）；新增结论：pyannote 模型门禁接受即可免费商用，
+但"留联系方式换授权"这步要写进部署文档，别在客户环境里卡壳。
