@@ -68,7 +68,7 @@ class Orchestrator:
             async with semaphore:
                 started = time.perf_counter()
                 summary = await self.llm.summarize(
-                    s.text, instruction="概括该视频片段的场景、人物与事件"
+                    s.text, instruction=cfg.summarize_instruction
                 )
                 partial = PartialSummary(shard_index=s.index, summary=summary)
                 if self.scorer is not None and self.corrector is not None:

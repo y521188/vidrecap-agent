@@ -90,6 +90,10 @@ class PipelineConfig(BaseModel):
     incremental_at: float = Field(
         default=0.8, gt=0, le=1.0, description="增量摘要触发进度（0~1）"
     )
+    summarize_instruction: str = Field(
+        default="概括该视频片段的场景、人物与事件",
+        description="分片摘要指令，用户自定义提示词的接入点",
+    )
 
     @model_validator(mode="after")
     def _overlap_must_be_smaller_than_shard(self) -> "PipelineConfig":

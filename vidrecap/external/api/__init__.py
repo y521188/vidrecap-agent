@@ -5,6 +5,7 @@ external/protocols.py，不在窗口里。
 """
 
 from vidrecap.external.adapters.demo import DemoCorrector, DemoLLM, DemoSource
+from vidrecap.external.adapters.openai import OpenAICompatibleLLM
 from vidrecap.external.adapters.srt import SrtSource
 from vidrecap.external.protocols import (
     LLMClient,
@@ -19,6 +20,7 @@ __all__ = [
     "DemoSource",
     "LLMClient",
     "MediaSource",
+    "OpenAICompatibleLLM",
     "QualityScorer",
     "SentenceCorrector",
     "SrtSource",

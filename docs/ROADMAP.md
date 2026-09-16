@@ -210,7 +210,7 @@ SRT 解析纯标准库手写（按空行切块、正则认时间戳），不引�
 与改前逐字节一致；`--srt` 同一文件跑两次逐字节一致；真实字幕端到端跑通，
 跨窗字幕在相邻两窗都出现（重叠缓冲语义正确）。
 
-### 提交 6：OpenAI 兼容大模型适配器（外部层）
+### 提交 6：OpenAI 兼容大模型适配器（外部层）✅ 已完成
 
 **目标**：接上第一个真实模型。任何 OpenAI 兼容端点（官方、DeepSeek、Qwen、Kimi…）
 都能当 `LLMClient` 用，引擎其余部分一行不改——这就是插座设计的兑现时刻。
@@ -221,6 +221,8 @@ SRT 解析纯标准库手写（按空行切块、正则认时间戳），不引�
 | `vidrecap/external/adapters/openai/__init__.py` | 新建：挂出 `OpenAICompatibleLLM` |
 | `vidrecap/external/api/__init__.py` | 挂出 |
 | `vidrecap/user/cli.py` | `demo` 加 `--llm openai`、`--model`、`--instruction`（自定义提示词，对应 JD 的"用户自定义 Prompt"；调优提示词属闭源资产，适配器只透传不内置） |
+| `vidrecap/data/models.py` | `PipelineConfig` 加 `summarize_instruction`（默认值 = 原先硬编码在编排器里的指令） |
+| `vidrecap/service/orchestrator.py` | 分片摘要改用 `cfg.summarize_instruction` |
 | `tests/test_openai_llm.py` | 新建：本地起标准库假 HTTP 服务，测请求组装、响应解析、超时、非 200 报错——**不打真网络** |
 | `AGENTS.md` | 文件清单同步 |
 
@@ -230,8 +232,19 @@ SRT 解析纯标准库手写（按空行切块、正则认时间戳），不引�
 **可选项（公信力卖点）**：同一套打分考卷换 LLM 打分器重跑，README 公布
 "启发式 vs 大模型"成绩对比。考卷与指标在提交 2 就为这一天设计的，零改造。
 
-**验收**：有 Key 时 `--llm openai --srt x.srt` 全流程跑通；无 Key 时一切照旧
-（默认路径输出逐字节不变）；假服务测试覆盖超时与错误路径。
+**实现时的三处调整**
+
+1. `--instruction` 要真正生效，得从命令行一路布线到模型调用——按铁律 3，
+   分片摘要指令的默认值从编排器的硬编码搬进 `PipelineConfig.summarize_instruction`，
+   命令行只做覆盖（默认路径输出逐字节不变）。
+2. **安全口径（安全工具拦过一次，结论保留）**：适配器是"使用者自己配置端点"的
+   客户端，不接收不可信输入构造 URL，因此**不做私网地址封禁**——连本地 ollama、
+   内网 vLLM 网关恰恰是核心用途；作为兜底，只允许 http/https 协议且不跟随重定向。
+3. 适配器暴露只读 `model` 属性，命令行据此显示实际生效的模型名（含来自
+   环境变量的情况）。
+
+**验收**：已完成。新增 10 个测试、全库 221 个全绿；默认 demo 输出逐字节一致；
+本地假服务上端到端跑通 `--llm openai`（含无模型名时的明确报错）。
 
 ### 提交 7：失败重试与降级（服务层）
 

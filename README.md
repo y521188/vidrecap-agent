@@ -29,6 +29,12 @@ python -m vidrecap demo --hours 3 --poison
 # 换上真实字幕（SRT 文件）：字幕是真的，模型仍是离线假模型，零 Key 可跑
 python -m vidrecap demo --srt 节目.srt
 
+# 接真实大模型（任意 OpenAI 兼容端点）：先设环境变量 OPENAI_API_KEY，模型名用 --model 或 OPENAI_MODEL
+python -m vidrecap demo --srt 节目.srt --llm openai --model deepseek-chat
+
+# 自定义分片摘要提示词（对 --llm demo 同样生效）
+python -m vidrecap demo --srt 节目.srt --instruction "提炼每段的论点与结论"
+
 # 跑评测集（打分器 49 题 + 修正器 15 题），低于基线时退出码非零
 python -m vidrecap eval --suite all
 ```
@@ -137,7 +143,7 @@ python -m vidrecap eval --suite all
 - [x] 语义补充修正 + 忠实性护栏（防幻觉）
 - [x] demo 注毒与端到端评测（`--poison` 等开关）
 - [x] SRT 字幕文件媒体源（`vidrecap demo --srt 文件.srt`）
-- [ ] OpenAI 兼容接口适配器（接真实大模型）
+- [x] OpenAI 兼容接口适配器（`--llm openai`，任意兼容端点，零新依赖）
 - [ ] ASR 音频直转媒体源（涉及模型权重许可证红线，见 docs/REUSE.md）
 - [ ] 分片级失败重试与降级策略
 - [ ] 服务化封装（gRPC）

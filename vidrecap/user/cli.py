@@ -19,7 +19,13 @@ import asyncio
 import sys
 
 from vidrecap.data.api import PipelineConfig, QualityConfig
-from vidrecap.external.api import DemoCorrector, DemoLLM, DemoSource, SrtSource
+from vidrecap.external.api import (
+    DemoCorrector,
+    DemoLLM,
+    DemoSource,
+    OpenAICompatibleLLM,
+    SrtSource,
+)
 from vidrecap.monitor.api import EvalReport, baseline_checks, run_eval
 from vidrecap.rules.api import HeuristicScorer
 from vidrecap.service.api import ProgressCallback, run_recap
@@ -77,6 +83,24 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="路径",
         help="用真实 SRT 字幕文件替代内置模拟数据（模型仍是离线假模型，零 Key 可跑）",
     )
+    demo.add_argument(
+        "--llm",
+        choices=["demo", "openai"],
+        default="demo",
+        help="用什么模型：demo=内置离线假模型（默认）；openai=任意 OpenAI 兼容端点",
+    )
+    demo.add_argument(
+        "--model",
+        default=None,
+        metavar="名称",
+        help="模型名（--llm openai 时必填，也可用环境变量 OPENAI_MODEL）",
+    )
+    demo.add_argument(
+        "--instruction",
+        default=None,
+        metavar="提示词",
+        help="覆盖分片摘要指令（用户自定义提示词；压缩合并指令不受影响）",
+    )
 
     evaluate = sub.add_parser("eval", help="跑评测集，打印成绩单（低于基线则退出码非零）")
     evaluate.add_argument(
@@ -93,11 +117,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _build_config(args: argparse.Namespace) -> PipelineConfig:
     """把命令行参数覆盖到配置上（未给的字段沿用配置里的默认值）。"""
+    overrides: dict[str, str] = {}
+    if args.instruction:
+        overrides["summarize_instruction"] = args.instruction
     return PipelineConfig(
         shard_seconds=args.shard_seconds,
         overlap_seconds=args.overlap_seconds,
         max_concurrency=args.concurrency,
         context_limit=args.context_limit,
+        **overrides,
     )
 
 
@@ -122,14 +150,22 @@ def _build_quality(args: argparse.Namespace):
 async def run_demo(args: argparse.Namespace) -> None:
     if args.srt and args.poison:
         raise SystemExit("--srt 与 --poison 不能同时使用：注毒只对内置模拟数据有意义")
+    if args.llm == "openai":
+        try:
+            llm = OpenAICompatibleLLM(model=args.model)
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+    else:
+        llm = DemoLLM()
     scorer, corrector, quality_config = _build_quality(args)
     poison_note = f" | 注毒 {args.poison:.0%}" if args.poison else ""
     quality_note = "" if args.no_correct else " | 质检修正开"
     source_note = f"字幕 {args.srt}" if args.srt else f"模拟视频 {args.hours} 小时"
+    model_note = f" | 模型 {llm.model}" if args.llm == "openai" else ""
     print(
         f"{source_note} | 分片 {args.shard_seconds:.0f}s | "
         f"重叠缓冲 {args.overlap_seconds:.0f}s | 并行 {args.concurrency} | "
-        f"上下文上限 {args.context_limit} 字符{poison_note}{quality_note}"
+        f"上下文上限 {args.context_limit} 字符{model_note}{poison_note}{quality_note}"
     )
     on_progress: ProgressCallback = lambda done, total: print(  # noqa: E731
         f"\r{_bar(done, total)}", end="", flush=True
@@ -140,7 +176,7 @@ async def run_demo(args: argparse.Namespace) -> None:
         source = DemoSource(hours=args.hours, poison_rate=args.poison)
     result = await run_recap(
         source,
-        DemoLLM(),
+        llm,
         _build_config(args),
         on_progress=on_progress,
         scorer=scorer,

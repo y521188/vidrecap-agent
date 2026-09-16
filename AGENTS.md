@@ -167,6 +167,8 @@ vidrecap/external/adapters/demo/corrector.py
 vidrecap/external/adapters/demo/text.py
 vidrecap/external/adapters/srt/__init__.py
 vidrecap/external/adapters/srt/source.py
+vidrecap/external/adapters/openai/__init__.py
+vidrecap/external/adapters/openai/llm.py
 vidrecap/monitor/__init__.py
 vidrecap/monitor/api/__init__.py
 vidrecap/monitor/evals/__init__.py
