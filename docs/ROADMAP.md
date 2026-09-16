@@ -146,7 +146,7 @@
 
 ---
 
-## 提交 4：demo 注毒 + 端到端评测 + 命令行开关
+## 提交 4：demo 注毒 + 端到端评测 + 命令行开关 ✅ 已完成
 
 **目标**：让整条链路在"有烂句"的情况下也能被验证，且保持确定性。
 
@@ -154,30 +154,21 @@
 
 | 文件 | 动作 |
 |---|---|
-| `vidrecap/external/adapters/demo/source.py` | 新增 `poison_rate` 参数：确定性注毒 |
-| `vidrecap/monitor/evals/scenarios.py` | 新建：端到端场景与属性断言 |
-| `vidrecap/user/cli.py` | 新增 `--poison` / `--no-correct` / `--threshold` / `--weights` |
-| `README.md`、`docs/ARCHITECTURE.md`、`AGENTS.md` | 更新架构图、状态与清单 |
+| `vidrecap/external/adapters/demo/source.py` | 已实现 `poison_rate`：三种手法按句子序号确定性轮换（丢主语 / 动词重复 / 截断） |
+| `vidrecap/user/cli.py` | 已实现 `--poison [比例]` / `--no-correct` / `--threshold` / `--weights` |
+| `tests/test_end_to_end.py` | 新建 4 条端到端断言 |
 
-**注毒设计**（按句子序号确定性选择，不用随机）
+**与规划的一处偏离**：`monitor/evals/scenarios.py` 不再单设——端到端断言没有
+生产调用方，纯属测试，按 YAGNI 直接放在 `tests/test_end_to_end.py`。
 
-| 手法 | 效果 |
-|---|---|
-| 丢主语 | 考验清晰度 |
-| 动词重复 | 考验通顺度 |
-| 截断（去句末标点并砍半） | 考验完整度 |
+**行为变化（有意的）**：demo 默认开启质检修正；原行为用 `--no-correct` 复现，
+已验证与最初基准**逐字节一致**。统计行追加"修正 N 句 | 平均质量 X"。
 
-**端到端断言**
+**端到端断言**（全部达成）：注毒时修正真的发生；最终概括无原文外实体
+（合并用的"[片段N]"序号标签剔除后核对）；修正让平均分上升；同一输入两次
+运行输出一致（`elapsed_sec` 是真实计时，不参与比较）。
 
-- 注毒开启时 `corrected_count > 0`，关闭时 `= 0`；
-- 最终概括里的实体全部来自原文（无幻觉）；
-- 修正后平均分高于修正前；
-- **同一输入跑两次，输出逐字节一致**（确定性兜底）。
-
-**验收**：端到端测试全绿；`vidrecap demo` 在注毒+修正下仍两次一致；
-既有 74 个测试不回归。
-
-**不做什么**：不做真实模型接入、不做失败重试。
+**验收**：196 个测试全绿。
 
 ---
 

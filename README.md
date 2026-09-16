@@ -20,8 +20,14 @@
 ```bash
 pip install -e .
 
-# 离线 demo：内置假数据 + 抽取式假大模型，不需要任何 API Key
+# 离线 demo：内置假数据 + 抽取式假大模型 + 质检修正，不需要任何 API Key
 python -m vidrecap demo --hours 3 --context-limit 1200
+
+# 注入 10% 病句（丢主语 / 动词重复 / 截断），观察质检回路"挑出来、修好"
+python -m vidrecap demo --hours 3 --poison
+
+# 跑评测集（打分器 49 题 + 修正器 15 题），低于基线时退出码非零
+python -m vidrecap eval --suite all
 ```
 
 输出示例：
@@ -126,7 +132,7 @@ python -m vidrecap eval --suite all
 - [x] 摘要质量打分器（清晰度 / 通顺度 / 完整度，0.7 阈值 + 单项一票否决）
 - [x] 摘要质量评测集与基准脚本（`vidrecap eval`）
 - [x] 语义补充修正 + 忠实性护栏（防幻觉）
-- [ ] demo 注毒与端到端评测（`--poison` 等开关）
+- [x] demo 注毒与端到端评测（`--poison` 等开关）
 - [ ] OpenAI 兼容接口适配器（接真实大模型）
 - [ ] ASR / 字幕文件媒体源适配器（SRT、ASR 输出）
 - [ ] 分片级失败重试与降级策略

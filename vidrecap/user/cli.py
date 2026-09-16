@@ -19,8 +19,9 @@ import asyncio
 import sys
 
 from vidrecap.data.api import PipelineConfig, QualityConfig
-from vidrecap.external.api import DemoLLM, DemoSource
+from vidrecap.external.api import DemoCorrector, DemoLLM, DemoSource
 from vidrecap.monitor.api import EvalReport, baseline_checks, run_eval
+from vidrecap.rules.api import HeuristicScorer
 from vidrecap.service.api import ProgressCallback, run_recap
 
 
@@ -35,7 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    demo = sub.add_parser("demo", help="用内置离线假数据跑通全流程")
+    demo = sub.add_parser("demo", help="用内置离线假数据跑通全流程（质检修正默认开启）")
     demo.add_argument("--hours", type=float, default=3.0, help="模拟视频时长（小时）")
     demo.add_argument(
         "--shard-seconds", type=float, default=600.0, help="分片时长（秒）"
@@ -46,6 +47,29 @@ def build_parser() -> argparse.ArgumentParser:
     demo.add_argument("--concurrency", type=int, default=4, help="并行度")
     demo.add_argument(
         "--context-limit", type=int, default=1200, help="上下文字符上限，超限触发二分递归压缩"
+    )
+    demo.add_argument(
+        "--poison",
+        nargs="?",
+        const=0.1,
+        default=0.0,
+        type=float,
+        metavar="RATE",
+        help="按比例确定性注入病句（默认 --poison 即 0.1），验证质检回路",
+    )
+    demo.add_argument(
+        "--no-correct", action="store_true", help="关闭质检修正（打分、修正都不跑）"
+    )
+    demo.add_argument(
+        "--threshold", type=float, default=None, help="覆盖判定阈值（默认 0.7）"
+    )
+    demo.add_argument(
+        "--weights",
+        nargs=3,
+        type=float,
+        default=None,
+        metavar=("CLARITY", "FLUENCY", "COMPLETE"),
+        help="覆盖三指标权重（需加和为 1，默认 0.5 0.3 0.2）",
     )
 
     evaluate = sub.add_parser("eval", help="跑评测集，打印成绩单（低于基线则退出码非零）")
@@ -71,20 +95,44 @@ def _build_config(args: argparse.Namespace) -> PipelineConfig:
     )
 
 
+def _build_quality(args: argparse.Namespace):
+    """装配质检回路：打分器、修正器与它们的配置；--no-correct 时全部为 None。"""
+    if args.no_correct:
+        return None, None, None
+
+    overrides = {}
+    if args.threshold is not None:
+        overrides["threshold"] = args.threshold
+    if args.weights is not None:
+        overrides.update(
+            clarity_weight=args.weights[0],
+            fluency_weight=args.weights[1],
+            completeness_weight=args.weights[2],
+        )
+    config = QualityConfig(**overrides) if overrides else None
+    return HeuristicScorer(config), DemoCorrector(), config
+
+
 async def run_demo(args: argparse.Namespace) -> None:
+    scorer, corrector, quality_config = _build_quality(args)
+    poison_note = f" | 注毒 {args.poison:.0%}" if args.poison else ""
+    quality_note = "" if args.no_correct else " | 质检修正开"
     print(
         f"模拟视频 {args.hours} 小时 | 分片 {args.shard_seconds:.0f}s | "
         f"重叠缓冲 {args.overlap_seconds:.0f}s | 并行 {args.concurrency} | "
-        f"上下文上限 {args.context_limit} 字符"
+        f"上下文上限 {args.context_limit} 字符{poison_note}{quality_note}"
     )
     on_progress: ProgressCallback = lambda done, total: print(  # noqa: E731
         f"\r{_bar(done, total)}", end="", flush=True
     )
     result = await run_recap(
-        DemoSource(hours=args.hours),
+        DemoSource(hours=args.hours, poison_rate=args.poison),
         DemoLLM(),
         _build_config(args),
         on_progress=on_progress,
+        scorer=scorer,
+        corrector=corrector,
+        quality_config=quality_config,
     )
     print("\n")
 
@@ -96,9 +144,14 @@ async def run_demo(args: argparse.Namespace) -> None:
     print(result.recap, "\n")
     s = result.stats
     print("=== 统计 ===")
-    print(f"分片数: {s.shard_count} | 压缩轮次: {s.compression_rounds} | "
-          f"输入 {s.chars_in} 字符 -> 输出 {s.chars_out} 字符 "
-          f"(压缩到 {s.chars_out / max(s.chars_in, 1):.1%})")
+    line = (
+        f"分片数: {s.shard_count} | 压缩轮次: {s.compression_rounds} | "
+        f"输入 {s.chars_in} 字符 -> 输出 {s.chars_out} 字符 "
+        f"(压缩到 {s.chars_out / max(s.chars_in, 1):.1%})"
+    )
+    if s.avg_quality is not None:
+        line += f" | 修正 {s.corrected_count} 句 | 平均质量 {s.avg_quality:.2f}"
+    print(line)
 
 
 def _print_report(report: EvalReport) -> bool:
