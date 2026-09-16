@@ -26,6 +26,9 @@ python -m vidrecap demo --hours 3 --context-limit 1200
 # 注入 10% 病句（丢主语 / 动词重复 / 截断），观察质检回路"挑出来、修好"
 python -m vidrecap demo --hours 3 --poison
 
+# 换上真实字幕（SRT 文件）：字幕是真的，模型仍是离线假模型，零 Key 可跑
+python -m vidrecap demo --srt 节目.srt
+
 # 跑评测集（打分器 49 题 + 修正器 15 题），低于基线时退出码非零
 python -m vidrecap eval --suite all
 ```
@@ -133,8 +136,9 @@ python -m vidrecap eval --suite all
 - [x] 摘要质量评测集与基准脚本（`vidrecap eval`）
 - [x] 语义补充修正 + 忠实性护栏（防幻觉）
 - [x] demo 注毒与端到端评测（`--poison` 等开关）
+- [x] SRT 字幕文件媒体源（`vidrecap demo --srt 文件.srt`）
 - [ ] OpenAI 兼容接口适配器（接真实大模型）
-- [ ] ASR / 字幕文件媒体源适配器（SRT、ASR 输出）
+- [ ] ASR 音频直转媒体源（涉及模型权重许可证红线，见 docs/REUSE.md）
 - [ ] 分片级失败重试与降级策略
 - [ ] 服务化封装（gRPC）
 

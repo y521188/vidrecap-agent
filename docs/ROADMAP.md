@@ -172,16 +172,115 @@
 
 ---
 
-## 交付之后的路线图
+## 阶段二（提交 5–8）：从"能跑"到"能用"
 
-| 功能 | 落哪层 | 依赖 |
+引擎侧（分片、压缩、质检、修正、评测）已经闭环，但吃的还是假数据。阶段二让它第一次
+接触真实输入与真实模型，同时守住两条底线：**零 Key 仍然可跑**、**默认 demo 行为不变**
+（每次提交都要证明 `vidrecap demo` 默认输出与改前逐字节一致）。
+
+```
+提交5（SRT 字幕源）──┐
+                      ├──→ 提交7（失败重试与降级）──→ 提交8（断点续跑）
+提交6（真实模型）────┘
+```
+
+提交 5 与 6 相互独立可换序；提交 7 与 8 都依赖提交 6——离线 demo 永不失败，
+"重试"和"续跑省钱"只有接上真实模型才有意义。
+
+### 提交 5：SRT 字幕源（外部层）✅ 已完成
+
+**目标**：引擎能吃上真实的字幕文件，`vidrecap demo --srt 文件.srt` 用真字幕 +
+离线模型跑通全流程（依然零 Key、零网络）。
+
+| 文件 | 动作 |
+|---|---|
+| `vidrecap/external/adapters/srt/source.py` | 新建：解析 SRT（序号 + `00:00:01,000 --> 00:00:04,000` 时间戳 + 文本行），实现 `MediaSource` 插座；`duration()` 取最后一条字幕结束时间；`content(start, end)` 按绝对时间返回窗内字幕 |
+| `vidrecap/external/adapters/srt/__init__.py` | 新建：挂出 `SrtSource` |
+| `vidrecap/external/api/__init__.py` | 挂出 `SrtSource` |
+| `vidrecap/user/cli.py` | `demo` 子命令加 `--srt 路径`：有值时媒体源换成 `SrtSource`，其余逻辑不动 |
+| `tests/test_srt_source.py` | 新建：固定 sample 字幕，断言时间轴对齐、重叠窗取到重复内容、时长、坏文件报错、确定性 |
+| `AGENTS.md` | 文件清单同步（CI 检查） |
+
+SRT 解析纯标准库手写（按空行切块、正则认时间戳），不引依赖；容错口径：BOM、
+`\r\n`、缺序号行要能吃下，时间戳解析失败直接报错（宁可不跑，不能静默错位）。
+实现时踩的坑：U+FEFF（BOM）不算空白符，`str.strip()` 吃不掉，第一块的序号行
+会认不出来——解析入口显式 `lstrip` 掉。
+
+**验收**：已完成。新增 11 个测试、全库 209 个全绿；不带 `--srt` 时 demo 输出
+与改前逐字节一致；`--srt` 同一文件跑两次逐字节一致；真实字幕端到端跑通，
+跨窗字幕在相邻两窗都出现（重叠缓冲语义正确）。
+
+### 提交 6：OpenAI 兼容大模型适配器（外部层）
+
+**目标**：接上第一个真实模型。任何 OpenAI 兼容端点（官方、DeepSeek、Qwen、Kimi…）
+都能当 `LLMClient` 用，引擎其余部分一行不改——这就是插座设计的兑现时刻。
+
+| 文件 | 动作 |
+|---|---|
+| `vidrecap/external/adapters/openai/llm.py` | 新建：`async summarize(text, instruction)` → `POST {base_url}/chat/completions`；base_url / api_key / model / timeout 从环境变量或参数读，不写死任何厂商 |
+| `vidrecap/external/adapters/openai/__init__.py` | 新建：挂出 `OpenAICompatibleLLM` |
+| `vidrecap/external/api/__init__.py` | 挂出 |
+| `vidrecap/user/cli.py` | `demo` 加 `--llm openai`、`--model`、`--instruction`（自定义提示词，对应 JD 的"用户自定义 Prompt"；调优提示词属闭源资产，适配器只透传不内置） |
+| `tests/test_openai_llm.py` | 新建：本地起标准库假 HTTP 服务，测请求组装、响应解析、超时、非 200 报错——**不打真网络** |
+| `AGENTS.md` | 文件清单同步 |
+
+**依赖决策（默认零依赖）**：HTTP 用标准库 `urllib.request` + `asyncio.to_thread` 包成异步，
+不加任何新包。若后续需要流式输出/连接池，再提 `httpx` 走"加依赖前先问"流程。
+
+**可选项（公信力卖点）**：同一套打分考卷换 LLM 打分器重跑，README 公布
+"启发式 vs 大模型"成绩对比。考卷与指标在提交 2 就为这一天设计的，零改造。
+
+**验收**：有 Key 时 `--llm openai --srt x.srt` 全流程跑通；无 Key 时一切照旧
+（默认路径输出逐字节不变）；假服务测试覆盖超时与错误路径。
+
+### 提交 7：失败重试与降级（服务层）
+
+**目标**：真实模型会超时、会限流，单个分片失败不能炸掉整个任务，也不能静默丢内容。
+
+| 文件 | 动作 |
+|---|---|
+| `vidrecap/service/orchestrator.py` | LLM 调用包上指数退避重试（次数、初始等待可配，默认 3 次 × 0.5s 起）；重试耗尽按 `PipelineConfig` 新开关走：跳过该分片并记入 `RecapStats.failed_shards`（默认），或整体抛错 |
+| `vidrecap/data/models.py` | `PipelineConfig` 加重试参数、失败策略开关（默认值只在这里声明一次）；`RecapStats` 加 `failed_shards` |
+| `tests/test_orchestrator.py` | 扩充：假 LLM 前 N 次抛错再成功 → 重试后成功且调用次数正确；始终抛错 → 跳过 + 统计正确；策略为抛错模式 → 整体失败 |
+
+重试手写约二十行，不引 tenacity（docs/REUSE.md 里有替换方案备着）。归属表里
+"失败重试"明确写在服务层——它是执行关切，不进规划层。
+
+**验收**：全部测试绿；默认参数下不触发重试的路径行为与改前一致。
+
+### 提交 8：断点续跑（数据层 + 服务层）
+
+**目标**：真实模型按量计费，3 小时视频几十个分片，中途挂掉不能从头烧一遍钱。
+
+| 文件 | 动作 |
+|---|---|
+| `vidrecap/data/store.py` | 新建：sqlite3（标准库）存分片结果；任务指纹 = 输入内容指纹，内容没变才能复用 |
+| `vidrecap/data/api/__init__.py` | 挂出 `TaskStore` |
+| `vidrecap/service/orchestrator.py` | 每片摘要落库；`--resume`（或参数）时先查库，已完成的分片直接复用，不重新调模型 |
+| `vidrecap/user/cli.py` | `demo` 加 `--store 路径`（给了才启用持久化，默认关闭，保持零依赖开箱即用） |
+| `tests/test_store.py` + `tests/test_orchestrator.py` 扩充 | 新建：假 LLM 第 3 片抛错 → 重跑 → 前 2 片调用计数为 0（没重新调模型）→ 最终输出与一次跑完一致；内容指纹变了必须全部重跑 |
+| `AGENTS.md` | 文件清单同步 |
+
+**验收**：中断重跑省钱（调用计数断言）；结果与一次跑完逐字节一致；不传 `--store`
+时行为与改前完全一致。
+
+### 阶段二统一验收
+
+1. 8 个提交做完后，`.venv/Scripts/python.exe -m pytest -q` 全绿（分层硬检查含新文件清单）；
+2. `vidrecap demo` 默认输出全程与基准逐字节一致（零 Key 底线的证据）;
+3. 有真实字幕 + 有 Key 时：一条命令端到端出长视频概括；
+4. 每个提交同步 `AGENTS.md` 文件清单与归属表。
+
+---
+
+## 更远的路线（阶段三及以后，先不展开）
+
+| 功能 | 落哪层 | 说明 |
 |---|---|---|
-| 真实大模型适配器（OpenAI 兼容） | 外部层 `external/adapters/openai/` | 同一套考卷上对比分数 |
-| SRT / ASR 媒体源适配器 | 外部层 `external/adapters/srt/` | 需要真实数据做 case study |
-| 分片级失败重试与降级 | 服务层 | 与 80% 增量摘要协同 |
-| 任务持久化、断点续跑 | 数据层 | 引入存储后端 |
-| gRPC / HTTP 服务化 | 用户层 | 复用 `run_recap` 入口 |
+| JD 对齐四件套：说话人标签与权重（大咖优先/配角过滤）、skill-md 配置 + 双重提示词约束、句法分析喂修正器、20% 语义交叠参数校准 | 外部层/规划层/规则层 | 等真实模型接上再做——没有真东西参照，校准就是闭门造车 |
+| gRPC / HTTP 服务化 | 用户层（新子目录） | 复用 `run_recap` 任务级入口 |
 | 监控指标导出与告警 | 监控层 | 结构化日志先行 |
+| ASR 音频直转（而非现成字幕） | 外部层 | 涉及模型权重许可证红线，见 docs/REUSE.md |
 
 每加一项，先确认它属于哪层、是否需要新插座，再补 `AGENTS.md` 的归属表与文件清单。
 

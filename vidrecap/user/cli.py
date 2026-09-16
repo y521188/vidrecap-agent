@@ -19,7 +19,7 @@ import asyncio
 import sys
 
 from vidrecap.data.api import PipelineConfig, QualityConfig
-from vidrecap.external.api import DemoCorrector, DemoLLM, DemoSource
+from vidrecap.external.api import DemoCorrector, DemoLLM, DemoSource, SrtSource
 from vidrecap.monitor.api import EvalReport, baseline_checks, run_eval
 from vidrecap.rules.api import HeuristicScorer
 from vidrecap.service.api import ProgressCallback, run_recap
@@ -71,6 +71,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar=("CLARITY", "FLUENCY", "COMPLETE"),
         help="覆盖三指标权重（需加和为 1，默认 0.5 0.3 0.2）",
     )
+    demo.add_argument(
+        "--srt",
+        default=None,
+        metavar="路径",
+        help="用真实 SRT 字幕文件替代内置模拟数据（模型仍是离线假模型，零 Key 可跑）",
+    )
 
     evaluate = sub.add_parser("eval", help="跑评测集，打印成绩单（低于基线则退出码非零）")
     evaluate.add_argument(
@@ -114,19 +120,26 @@ def _build_quality(args: argparse.Namespace):
 
 
 async def run_demo(args: argparse.Namespace) -> None:
+    if args.srt and args.poison:
+        raise SystemExit("--srt 与 --poison 不能同时使用：注毒只对内置模拟数据有意义")
     scorer, corrector, quality_config = _build_quality(args)
     poison_note = f" | 注毒 {args.poison:.0%}" if args.poison else ""
     quality_note = "" if args.no_correct else " | 质检修正开"
+    source_note = f"字幕 {args.srt}" if args.srt else f"模拟视频 {args.hours} 小时"
     print(
-        f"模拟视频 {args.hours} 小时 | 分片 {args.shard_seconds:.0f}s | "
+        f"{source_note} | 分片 {args.shard_seconds:.0f}s | "
         f"重叠缓冲 {args.overlap_seconds:.0f}s | 并行 {args.concurrency} | "
         f"上下文上限 {args.context_limit} 字符{poison_note}{quality_note}"
     )
     on_progress: ProgressCallback = lambda done, total: print(  # noqa: E731
         f"\r{_bar(done, total)}", end="", flush=True
     )
+    if args.srt:
+        source = SrtSource(args.srt)
+    else:
+        source = DemoSource(hours=args.hours, poison_rate=args.poison)
     result = await run_recap(
-        DemoSource(hours=args.hours, poison_rate=args.poison),
+        source,
         DemoLLM(),
         _build_config(args),
         on_progress=on_progress,

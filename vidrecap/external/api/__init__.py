@@ -5,6 +5,7 @@ external/protocols.py，不在窗口里。
 """
 
 from vidrecap.external.adapters.demo import DemoCorrector, DemoLLM, DemoSource
+from vidrecap.external.adapters.srt import SrtSource
 from vidrecap.external.protocols import (
     LLMClient,
     MediaSource,
@@ -20,4 +21,5 @@ __all__ = [
     "MediaSource",
     "QualityScorer",
     "SentenceCorrector",
+    "SrtSource",
 ]
