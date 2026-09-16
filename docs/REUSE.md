@@ -107,3 +107,8 @@
 
 **通用提醒**：没有许可证文件 ≠ 可以随便用；模型仓库（HuggingFace / ModelScope）的许可与
 GitHub 代码仓库的许可是两套东西，都要看。
+
+**落地记录（2026-09）**：按上表结论，"视频 → 字幕"这一步用外挂脚本
+`scripts/video2recap.py` 实现：默认走 faster-whisper（MIT，含模型权重），
+由使用者按需自装、不进 vidrecap 依赖树；whisper-timestamped（AGPL）不引入。
+脚本只产 SRT，概括链路仍由包内 `SrtSource` + `vidrecap demo` 完成。

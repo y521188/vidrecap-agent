@@ -35,6 +35,10 @@ python -m vidrecap demo --srt 节目.srt --llm openai --model deepseek-chat
 # 自定义分片摘要提示词（对 --llm demo 同样生效）
 python -m vidrecap demo --srt 节目.srt --instruction "提炼每段的论点与结论"
 
+# 视频 → 字幕 → 概括一条龙（外挂脚本；语音识别按需自装、不进包依赖）
+pip install faster-whisper   # MIT 许可证（连模型权重都是）
+python scripts/video2recap.py 节目.mp4 --llm openai --model deepseek-chat
+
 # 跑评测集（打分器 49 题 + 修正器 15 题），低于基线时退出码非零
 python -m vidrecap eval --suite all
 ```
@@ -147,6 +151,7 @@ python -m vidrecap eval --suite all
 - [ ] ASR 音频直转媒体源（涉及模型权重许可证红线，见 docs/REUSE.md）
 - [x] 分片失败重试与降级（默认跳过并记账，重试参数可配）
 - [x] 断点续跑（`--store`，sqlite 内容寻址缓存，重跑不再为已完成的分片花钱）
+- [x] 外挂一条龙脚本（视频 → 字幕 → 概括，`scripts/video2recap.py`，语音识别按需自装）
 - [ ] 服务化封装（gRPC）
 
 ## 许可证
