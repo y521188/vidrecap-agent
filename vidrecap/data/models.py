@@ -136,6 +136,10 @@ class PipelineConfig(BaseModel):
         default="概括该视频片段的场景、人物与事件",
         description="分片摘要指令，用户自定义提示词的接入点",
     )
+    system_prompt: str = Field(
+        default="",
+        description="系统提示词（角色与规则，由技能文件提供）；空=不发 system 消息",
+    )
     max_retries: int = Field(default=3, ge=0, description="LLM 调用失败后的重试次数")
     retry_initial_delay: float = Field(
         default=0.5, gt=0, description="首次重试等待秒数，之后指数退避"
@@ -150,6 +154,28 @@ class PipelineConfig(BaseModel):
     def _overlap_must_be_smaller_than_shard(self) -> "PipelineConfig":
         if self.overlap_seconds >= self.shard_seconds:
             raise ValueError("overlap_seconds must be smaller than shard_seconds")
+        return self
+
+
+class SkillConfig(BaseModel):
+    """技能配置（skill-md 解析结果）：System Prompt 与摘要策略的载体。
+
+    表达的只是"技能文件里写了什么"；合并优先级的逻辑在用户层装配根
+    （命令行 > 技能文件 > 默认值）。字段留 None = 技能没提这件事。
+    """
+
+    name: str = ""
+    description: str = ""
+    system_prompt: str = ""
+    summarize_instruction: str = ""
+    threshold: float | None = Field(default=None, ge=0, le=1)
+    weights: list[float] | None = None
+    min_share: float | None = Field(default=None, gt=0, le=1)
+
+    @model_validator(mode="after")
+    def _weights_must_have_three_terms(self) -> "SkillConfig":
+        if self.weights is not None and len(self.weights) != 3:
+            raise ValueError("weights 必须是三项：清晰度、通顺度、完整度")
         return self
 
 

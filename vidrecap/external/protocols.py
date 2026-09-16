@@ -20,9 +20,18 @@ from vidrecap.data.api import SentenceScore, SpeakerProfile, SubtitleLine
 
 @runtime_checkable
 class LLMClient(Protocol):
-    """大模型客户端的最小接口：给它一段文本，还你一份摘要。"""
+    """大模型客户端的最小接口：给它一段文本，还你一份摘要。
 
-    async def summarize(self, text: str, instruction: str = "") -> str: ...
+    两级提示词（双重约束）：
+
+    - ``system``：角色与规则（技能文件里的 System Prompt），实现方应作为
+      system 消息发送；
+    - ``instruction``：本次任务要求（用户自定义 Prompt）。
+
+    两者都可为空，为空就不发对应的消息——老用法（只传 text）行为不变。
+    """
+
+    async def summarize(self, text: str, instruction: str = "", system: str = "") -> str: ...
 
 
 @runtime_checkable

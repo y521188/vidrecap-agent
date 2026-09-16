@@ -39,6 +39,12 @@ python -m vidrecap demo --srt 节目.srt --instruction "提炼每段的论点与
 pip install faster-whisper   # MIT 许可证（连模型权重都是）
 python scripts/video2recap.py 节目.mp4 --llm openai --model deepseek-chat
 
+# 技能文件（skill-md）：System Prompt 与摘要策略一起声明，命令行参数优先
+python -m vidrecap demo --srt 节目.srt --skill skills/新闻摘要.md
+
+# 从后台目录取数（带人物标签）：大咖优先保留，低频配角过滤
+python -m vidrecap demo --catalog --hours 3
+
 # 跑评测集（打分器 49 题 + 修正器 15 题），低于基线时退出码非零
 python -m vidrecap eval --suite all
 ```
@@ -152,6 +158,9 @@ python -m vidrecap eval --suite all
 - [x] 分片失败重试与降级（默认跳过并记账，重试参数可配）
 - [x] 断点续跑（`--store`，sqlite 内容寻址缓存，重跑不再为已完成的分片花钱）
 - [x] 外挂一条龙脚本（视频 → 字幕 → 概括，`scripts/video2recap.py`，语音识别按需自装）
+- [x] 后台目录取数与人物权重（`--catalog`，大咖优先、配角过滤）
+- [x] skill-md 技能文件与双重提示词约束（`--skill`，格式对齐 Agent Skills 标准）
+- [ ] 画面与人物动作（抽帧 + 视觉模型，外挂扩展）
 - [ ] 服务化封装（gRPC）
 
 ## 许可证

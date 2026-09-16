@@ -15,7 +15,8 @@ class DemoLLM:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def summarize(self, text: str, instruction: str = "") -> str:
+    async def summarize(self, text: str, instruction: str = "", system: str = "") -> str:
+        # 抽取式假模型：两级提示词都收下但不使用（确定性输出优先）
         self.calls += 1
         sentences = split_sentences(text)
         kept = sentences[::2] if len(sentences) > 4 else sentences

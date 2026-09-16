@@ -67,7 +67,7 @@ async def test_request_assembly_and_response_parsing():
     assert recorded["auth"] == "Bearer sk-test"
     assert recorded["body"]["model"] == "test-model"
     assert recorded["body"]["messages"] == [
-        {"role": "system", "content": "概括它"},
+        {"role": "user", "content": "概括它"},
         {"role": "user", "content": "这是正文。"},
     ]
 
@@ -76,6 +76,17 @@ async def test_empty_instruction_sends_no_system_message():
     with _fake_endpoint() as (recorded, url):
         await _client(url).summarize("只有正文。")
     assert recorded["body"]["messages"] == [{"role": "user", "content": "只有正文。"}]
+
+
+async def test_dual_prompts_become_separate_messages():
+    """双重约束：System Prompt 与用户指令各成一条消息，正文最后。"""
+    with _fake_endpoint() as (recorded, url):
+        await _client(url).summarize("正文", instruction="本次要求", system="你是资深编辑。")
+    assert recorded["body"]["messages"] == [
+        {"role": "system", "content": "你是资深编辑。"},
+        {"role": "user", "content": "本次要求"},
+        {"role": "user", "content": "正文"},
+    ]
 
 
 async def test_http_error_is_surfaced_with_status():

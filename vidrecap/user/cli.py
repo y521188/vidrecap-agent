@@ -18,7 +18,13 @@ import argparse
 import asyncio
 import sys
 
-from vidrecap.data.api import PipelineConfig, QualityConfig, TaskStore
+from vidrecap.data.api import (
+    PipelineConfig,
+    QualityConfig,
+    SkillConfig,
+    SpeakerPolicyConfig,
+    TaskStore,
+)
 from vidrecap.external.api import (
     DemoCatalog,
     DemoCorrector,
@@ -30,6 +36,7 @@ from vidrecap.external.api import (
 from vidrecap.monitor.api import EvalReport, baseline_checks, run_eval
 from vidrecap.rules.api import HeuristicScorer
 from vidrecap.service.api import ProgressCallback, run_recap
+from vidrecap.user.skills import load_skill
 
 
 def _bar(done: int, total: int, width: int = 28) -> str:
@@ -113,6 +120,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="从后台目录取数（带人物标签）：大咖优先保留，低频配角过滤",
     )
+    demo.add_argument(
+        "--skill",
+        default=None,
+        metavar="文件.md",
+        help="技能文件（skill-md）：System Prompt + 摘要策略；命令行参数优先于它",
+    )
 
     evaluate = sub.add_parser("eval", help="跑评测集，打印成绩单（低于基线则退出码非零）")
     evaluate.add_argument(
@@ -127,11 +140,16 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _build_config(args: argparse.Namespace) -> PipelineConfig:
-    """把命令行参数覆盖到配置上（未给的字段沿用配置里的默认值）。"""
-    overrides: dict[str, str] = {}
-    if args.instruction:
-        overrides["summarize_instruction"] = args.instruction
+def _build_config(
+    args: argparse.Namespace, skill: SkillConfig | None = None
+) -> PipelineConfig:
+    """把命令行参数覆盖到配置上；优先级：命令行 > 技能文件 > 默认值。"""
+    overrides: dict[str, object] = {}
+    instruction = args.instruction or (skill.summarize_instruction if skill else "")
+    if instruction:
+        overrides["summarize_instruction"] = instruction
+    if skill is not None and skill.system_prompt:
+        overrides["system_prompt"] = skill.system_prompt
     return PipelineConfig(
         shard_seconds=args.shard_seconds,
         overlap_seconds=args.overlap_seconds,
@@ -141,19 +159,24 @@ def _build_config(args: argparse.Namespace) -> PipelineConfig:
     )
 
 
-def _build_quality(args: argparse.Namespace):
-    """装配质检回路：打分器、修正器与它们的配置；--no-correct 时全部为 None。"""
+def _build_quality(args: argparse.Namespace, skill: SkillConfig | None = None):
+    """装配质检回路：打分器、修正器与它们的配置；--no-correct 时全部为 None。
+
+    阈值与权重的优先级：命令行 > 技能文件 > 配置默认值。
+    """
     if args.no_correct:
         return None, None, None
 
+    threshold = args.threshold if args.threshold is not None else (skill.threshold if skill else None)
+    weights = args.weights if args.weights is not None else (skill.weights if skill else None)
     overrides = {}
-    if args.threshold is not None:
-        overrides["threshold"] = args.threshold
-    if args.weights is not None:
+    if threshold is not None:
+        overrides["threshold"] = threshold
+    if weights is not None:
         overrides.update(
-            clarity_weight=args.weights[0],
-            fluency_weight=args.weights[1],
-            completeness_weight=args.weights[2],
+            clarity_weight=weights[0],
+            fluency_weight=weights[1],
+            completeness_weight=weights[2],
         )
     config = QualityConfig(**overrides) if overrides else None
     return HeuristicScorer(config), DemoCorrector(), config
@@ -162,6 +185,7 @@ def _build_quality(args: argparse.Namespace):
 async def run_demo(args: argparse.Namespace) -> None:
     if args.srt and args.poison:
         raise SystemExit("--srt 与 --poison 不能同时使用：注毒只对内置模拟数据有意义")
+    skill = load_skill(args.skill) if args.skill else None
     if args.llm == "openai":
         try:
             llm = OpenAICompatibleLLM(model=args.model)
@@ -174,16 +198,18 @@ async def run_demo(args: argparse.Namespace) -> None:
         if args.store
         else None
     )
-    scorer, corrector, quality_config = _build_quality(args)
+    scorer, corrector, quality_config = _build_quality(args, skill)
     poison_note = f" | 注毒 {args.poison:.0%}" if args.poison else ""
     quality_note = "" if args.no_correct else " | 质检修正开"
     source_note = f"字幕 {args.srt}" if args.srt else f"模拟视频 {args.hours} 小时"
     catalog_note = " | 目录取数" if args.catalog else ""
     model_note = f" | 模型 {llm.model}" if args.llm == "openai" else ""
+    skill_note = f" | 技能 {skill.name or args.skill}" if skill else ""
     print(
         f"{source_note} | 分片 {args.shard_seconds:.0f}s | "
         f"重叠缓冲 {args.overlap_seconds:.0f}s | 并行 {args.concurrency} | "
-        f"上下文上限 {args.context_limit} 字符{model_note}{catalog_note}{poison_note}{quality_note}"
+        f"上下文上限 {args.context_limit} 字符"
+        f"{model_note}{skill_note}{catalog_note}{poison_note}{quality_note}"
     )
     on_progress: ProgressCallback = lambda done, total: print(  # noqa: E731
         f"\r{_bar(done, total)}", end="", flush=True
@@ -196,13 +222,18 @@ async def run_demo(args: argparse.Namespace) -> None:
         result = await run_recap(
             source,
             llm,
-            _build_config(args),
+            _build_config(args, skill),
             on_progress=on_progress,
             scorer=scorer,
             corrector=corrector,
             quality_config=quality_config,
             store=store,
             catalog=DemoCatalog(hours=args.hours) if args.catalog else None,
+            speaker_config=(
+                SpeakerPolicyConfig(min_share=skill.min_share)
+                if skill and skill.min_share is not None
+                else None
+            ),
         )
     finally:
         if store is not None:

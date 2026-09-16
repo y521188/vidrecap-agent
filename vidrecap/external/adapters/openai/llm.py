@@ -56,12 +56,23 @@ class OpenAICompatibleLLM:
         """实际生效的模型名（参数与环境变量合并后的结果）。"""
         return self._model
 
-    async def summarize(self, text: str, instruction: str = "") -> str:
+    async def summarize(self, text: str, instruction: str = "", system: str = "") -> str:
+        return await asyncio.to_thread(
+            self._post, self._build_messages(text, instruction, system)
+        )
+
+    @staticmethod
+    def _build_messages(
+        text: str, instruction: str, system: str
+    ) -> list[dict[str, str]]:
+        """双级约束分别成消息：system=角色与规则，user=本次要求，最后是正文。"""
         messages: list[dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
         if instruction:
-            messages.append({"role": "system", "content": instruction})
+            messages.append({"role": "user", "content": instruction})
         messages.append({"role": "user", "content": text})
-        return await asyncio.to_thread(self._post, messages)
+        return messages
 
     def _post(self, messages: list[dict[str, str]]) -> str:
         url = f"{self._base_url}/chat/completions"

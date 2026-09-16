@@ -40,6 +40,19 @@ from vidrecap.service.sharder import shard
 ProgressCallback = Callable[[int, int], None]
 
 
+def _summarize(llm: LLMClient, text: str, config: PipelineConfig) -> Awaitable[str]:
+    """按需传两级提示词：system 为空就不传该参数。
+
+    这样按老签名（只认 instruction）写的适配器不会被打挂——
+    双重约束是加法，不是破坏性改动。
+    """
+    if config.system_prompt:
+        return llm.summarize(
+            text, instruction=config.summarize_instruction, system=config.system_prompt
+        )
+    return llm.summarize(text, instruction=config.summarize_instruction)
+
+
 async def _retry(call: Callable[[], Awaitable[str]], config: PipelineConfig) -> str:
     """指数退避重试：LLM 的超时与限流大多是暂时的，值得再敲几次门。"""
     delay = config.retry_initial_delay
@@ -130,10 +143,7 @@ class Orchestrator:
                 started = time.perf_counter()
                 try:
                     summary = await _retry(
-                        lambda: self.llm.summarize(
-                            s.text, instruction=cfg.summarize_instruction
-                        ),
-                        cfg,
+                        lambda: _summarize(self.llm, s.text, cfg), cfg
                     )
                 except Exception:
                     if cfg.on_shard_failure == "raise":
