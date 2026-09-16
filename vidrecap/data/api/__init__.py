@@ -3,6 +3,7 @@
 本窗口只做转出（re-export），不写任何逻辑。
 """
 
+from vidrecap.data.store import TaskStore
 from vidrecap.data.models import (
     CompressionStep,
     CorrectionPlan,
@@ -27,4 +28,5 @@ __all__ = [
     "RecapStats",
     "SentenceScore",
     "Shard",
+    "TaskStore",
 ]

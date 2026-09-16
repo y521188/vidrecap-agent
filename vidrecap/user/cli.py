@@ -18,7 +18,7 @@ import argparse
 import asyncio
 import sys
 
-from vidrecap.data.api import PipelineConfig, QualityConfig
+from vidrecap.data.api import PipelineConfig, QualityConfig, TaskStore
 from vidrecap.external.api import (
     DemoCorrector,
     DemoLLM,
@@ -101,6 +101,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="提示词",
         help="覆盖分片摘要指令（用户自定义提示词；压缩合并指令不受影响）",
     )
+    demo.add_argument(
+        "--store",
+        default=None,
+        metavar="路径",
+        help="启用断点续跑：分片摘要存进该 sqlite 文件，重跑时已完成的分片不再调模型",
+    )
 
     evaluate = sub.add_parser("eval", help="跑评测集，打印成绩单（低于基线则退出码非零）")
     evaluate.add_argument(
@@ -157,6 +163,11 @@ async def run_demo(args: argparse.Namespace) -> None:
             raise SystemExit(str(exc))
     else:
         llm = DemoLLM()
+    store = (
+        TaskStore(args.store, namespace=f"{args.llm}:{args.model or ''}")
+        if args.store
+        else None
+    )
     scorer, corrector, quality_config = _build_quality(args)
     poison_note = f" | 注毒 {args.poison:.0%}" if args.poison else ""
     quality_note = "" if args.no_correct else " | 质检修正开"
@@ -174,15 +185,20 @@ async def run_demo(args: argparse.Namespace) -> None:
         source = SrtSource(args.srt)
     else:
         source = DemoSource(hours=args.hours, poison_rate=args.poison)
-    result = await run_recap(
-        source,
-        llm,
-        _build_config(args),
-        on_progress=on_progress,
-        scorer=scorer,
-        corrector=corrector,
-        quality_config=quality_config,
-    )
+    try:
+        result = await run_recap(
+            source,
+            llm,
+            _build_config(args),
+            on_progress=on_progress,
+            scorer=scorer,
+            corrector=corrector,
+            quality_config=quality_config,
+            store=store,
+        )
+    finally:
+        if store is not None:
+            store.close()
     print("\n")
 
     if result.incremental_recap:

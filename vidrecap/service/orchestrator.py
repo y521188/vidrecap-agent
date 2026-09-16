@@ -21,6 +21,7 @@ from vidrecap.data.api import (
     RecapResult,
     RecapStats,
     Shard,
+    TaskStore,
 )
 from vidrecap.external.api import LLMClient, MediaSource, QualityScorer, SentenceCorrector
 from vidrecap.service.compressor import compress
@@ -61,6 +62,7 @@ class Orchestrator:
         scorer: QualityScorer | None = None,
         corrector: SentenceCorrector | None = None,
         quality_config: QualityConfig | None = None,
+        store: TaskStore | None = None,
     ) -> None:
         self.llm = llm
         self.config = config or PipelineConfig()
@@ -68,9 +70,11 @@ class Orchestrator:
         self.scorer = scorer
         self.corrector = corrector
         self.quality_config = quality_config
+        self.store = store
 
     async def run(self, source: MediaSource) -> RecapResult:
         cfg = self.config
+        store = self.store
         shards = shard(source, cfg.shard_seconds, cfg.overlap_seconds)
         total = len(shards)
         semaphore = asyncio.Semaphore(cfg.max_concurrency)
@@ -79,7 +83,25 @@ class Orchestrator:
         incremental_target = max(1, round(total * cfg.incremental_at))
         chars_in = sum(len(s.text) for s in shards)
 
+        def _finish(partial: PartialSummary) -> PartialSummary:
+            """记下成果、报进度；进度达标时异步先产出一版增量局部摘要。"""
+            results[partial.shard_index] = partial
+            state["done"] += 1
+            if self.on_progress:
+                self.on_progress(state["done"], total)
+            if state["done"] == incremental_target and state["incremental_task"] is None:
+                state["incremental_task"] = asyncio.create_task(
+                    self._merge(list(results.values()))
+                )
+            return partial
+
         async def summarize_one(s: Shard) -> PartialSummary | None:
+            key = store.key(s.text) if store is not None else None
+            if key is not None:
+                cached = store.load(key, s.index)
+                if cached is not None:
+                    # 缓存命中不占并发名额：没有模型调用，不值得排队
+                    return _finish(cached)
             async with semaphore:
                 started = time.perf_counter()
                 try:
@@ -112,16 +134,9 @@ class Orchestrator:
                 partial = partial.model_copy(
                     update={"elapsed_sec": time.perf_counter() - started}
                 )
-            results[s.index] = partial
-            state["done"] += 1
-            if self.on_progress:
-                self.on_progress(state["done"], total)
-            # 进度达标时异步先产出一版增量局部摘要，不等剩余分片
-            if state["done"] == incremental_target and state["incremental_task"] is None:
-                state["incremental_task"] = asyncio.create_task(
-                    self._merge(list(results.values()))
-                )
-            return partial
+                if key is not None:
+                    store.save(key, partial)  # 质检之后的最终结果才进缓存
+            return _finish(partial)
 
         gathered = await asyncio.gather(*(summarize_one(s) for s in shards))
         partials = [p for p in gathered if p is not None]
@@ -166,6 +181,7 @@ async def run_recap(
     scorer: QualityScorer | None = None,
     corrector: SentenceCorrector | None = None,
     quality_config: QualityConfig | None = None,
+    store: TaskStore | None = None,
 ) -> RecapResult:
     """任务级入口：命令行、将来的服务化封装、测试都从这里发起任务。
 
@@ -178,4 +194,5 @@ async def run_recap(
         scorer=scorer,
         corrector=corrector,
         quality_config=quality_config,
+        store=store,
     ).run(source)

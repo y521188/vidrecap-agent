@@ -145,7 +145,8 @@ python -m vidrecap eval --suite all
 - [x] SRT 字幕文件媒体源（`vidrecap demo --srt 文件.srt`）
 - [x] OpenAI 兼容接口适配器（`--llm openai`，任意兼容端点，零新依赖）
 - [ ] ASR 音频直转媒体源（涉及模型权重许可证红线，见 docs/REUSE.md）
-- [ ] 分片级失败重试与降级策略
+- [x] 分片失败重试与降级（默认跳过并记账，重试参数可配）
+- [x] 断点续跑（`--store`，sqlite 内容寻址缓存，重跑不再为已完成的分片花钱）
 - [ ] 服务化封装（gRPC）
 
 ## 许可证

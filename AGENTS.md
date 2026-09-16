@@ -156,6 +156,7 @@ vidrecap/rules/baselines.py
 vidrecap/data/__init__.py
 vidrecap/data/api/__init__.py
 vidrecap/data/models.py
+vidrecap/data/store.py
 vidrecap/external/__init__.py
 vidrecap/external/api/__init__.py
 vidrecap/external/protocols.py
@@ -214,11 +215,13 @@ vidrecap/monitor/evals/runner.py
 **规则层三指标打分器与达标判定**（清晰度/通顺度/完整度 + 阈值 + 单项一票否决）、
 **评测集与跑分**（49 条手写考卷、指标、`vidrecap eval`、CI 基线门槛）、
 **语义修正回路**（拆句→打分→计划→修正→重打分→护栏→回退，B 层考卷 15 条，四项基线达标）、
-**demo 注毒与端到端评测**（确定性注毒、`--poison` 等开关、四条端到端断言）。
+**demo 注毒与端到端评测**（确定性注毒、`--poison` 等开关、四条端到端断言）、
+**阶段二：真实接入**（SRT 字幕源 `--srt`、OpenAI 兼容模型 `--llm openai`、
+用户自定义提示词 `--instruction`、分片失败重试与降级、断点续跑 `--store`）。
 
-ROADMAP 的四次提交全部完成，仓库内不再有 `raise NotImplementedError` 骨架。
+ROADMAP 的提交 1–8 全部完成，仓库内不再有 `raise NotImplementedError` 骨架。
 
-**更远的方向**（真实大模型适配器、SRT/ASR 媒体源、失败重试、任务持久化、gRPC 服务化）
+**更远的方向**（JD 对齐四件套、gRPC 服务化、监控导出、ASR 音频直转）
 见 [docs/ROADMAP.md](docs/ROADMAP.md) 与 [docs/REUSE.md](docs/REUSE.md)。
 
 更远：真实大模型适配器、SRT/ASR 媒体源、失败重试与降级、任务持久化、gRPC 服务化；
