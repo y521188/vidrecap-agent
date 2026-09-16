@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from vidrecap.data.api import SentenceScore
+from vidrecap.data.api import SentenceScore, SpeakerProfile, SubtitleLine
 
 
 @runtime_checkable
@@ -35,6 +35,24 @@ class MediaSource(Protocol):
     def duration(self) -> float: ...
 
     def content(self, start: float, end: float) -> str: ...
+
+
+@runtime_checkable
+class ContentCatalog(Protocol):
+    """后台内容目录：给时间段，还"带说话人的字幕行 + 人物档案"。
+
+    这是"Function Calling 调后台接口取字幕与人物标签"的落点：引擎在
+    确定知道该取哪段数据的时候直接调适配器（确定性取数），不需要模型
+    自己决定何时调工具——省 token、稳定、可复现。模型自主发起工具调用
+    只作为可选演示形态，不进核心链路。
+
+    接口是异步的：慢实现（HTTP、远程数据库）请在自己的适配器里用
+    `asyncio.to_thread` 包一层——包装由适配器负责，与 QualityScorer 同规。
+    """
+
+    async def lines(self, start: float, end: float) -> list[SubtitleLine]: ...
+
+    async def speaker_profiles(self) -> dict[str, SpeakerProfile]: ...
 
 
 @runtime_checkable

@@ -15,6 +15,8 @@ from vidrecap.data.models import (
     RecapStats,
     SentenceScore,
     Shard,
+    SpeakerProfile,
+    SubtitleLine,
 )
 
 __all__ = [
@@ -28,5 +30,7 @@ __all__ = [
     "RecapStats",
     "SentenceScore",
     "Shard",
+    "SpeakerProfile",
+    "SubtitleLine",
     "TaskStore",
 ]

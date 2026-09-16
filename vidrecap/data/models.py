@@ -27,6 +27,26 @@ class Shard(BaseModel):
     text: str = ""
 
 
+class SubtitleLine(BaseModel):
+    """一条带说话人的字幕行：后台内容目录取数的基本单位。
+
+    speaker 为空串表示"不知道谁说的"——没有人物标签的源照样能走流水线。
+    """
+
+    start: float = Field(ge=0, description="开始秒")
+    end: float = Field(gt=0, description="结束秒")
+    text: str
+    speaker: str = ""
+
+
+class SpeakerProfile(BaseModel):
+    """人物档案：人物权重策略的判断依据（大咖优先、高频优先、配角过滤）。"""
+
+    name: str
+    tier: Literal["vip", "regular"] = Field(default="regular", description="vip=大咖")
+    appearances: int = Field(default=0, ge=0, description="出现次数（高频优先保留）")
+
+
 class PartialSummary(BaseModel):
     """单个分片解析完成后输出的局部摘要。
 
