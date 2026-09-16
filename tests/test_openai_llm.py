@@ -89,6 +89,20 @@ async def test_dual_prompts_become_separate_messages():
     ]
 
 
+async def test_describe_image_inlines_jpeg_as_data_uri():
+    payload = {"choices": [{"message": {"content": "主讲人翻到第二页。"}}]}
+    with _fake_endpoint(payload=payload) as (recorded, url):
+        text = await _client(url).describe_image(
+            b"\xff\xd8fake-jpeg", prompt="描述画面", system="你是编辑"
+        )
+    assert text == "主讲人翻到第二页。"
+    messages = recorded["body"]["messages"]
+    assert messages[0] == {"role": "system", "content": "你是编辑"}
+    parts = messages[1]["content"]
+    assert parts[0] == {"type": "text", "text": "描述画面"}
+    assert parts[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+
 async def test_http_error_is_surfaced_with_status():
     with _fake_endpoint(status=500, payload={"error": "boom"}) as (_, url):
         with pytest.raises(RuntimeError, match="500"):

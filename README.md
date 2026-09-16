@@ -39,6 +39,10 @@ python -m vidrecap demo --srt 节目.srt --instruction "提炼每段的论点与
 pip install faster-whisper   # MIT 许可证（连模型权重都是）
 python scripts/video2recap.py 节目.mp4 --llm openai --model deepseek-chat
 
+# 带画面分析：抽帧 + 视觉模型描述"谁在做什么"，与语音字幕合并成一条时间线
+# （按帧计费：默认每 120 秒一帧、最多 200 帧，运行前会打印帧数）
+python scripts/video2recap.py 节目.mp4 --visual --vision-model qwen-vl-max --llm openai --model deepseek-chat
+
 # 技能文件（skill-md）：System Prompt 与摘要策略一起声明，命令行参数优先
 python -m vidrecap demo --srt 节目.srt --skill skills/新闻摘要.md
 
@@ -160,7 +164,7 @@ python -m vidrecap eval --suite all
 - [x] 外挂一条龙脚本（视频 → 字幕 → 概括，`scripts/video2recap.py`，语音识别按需自装）
 - [x] 后台目录取数与人物权重（`--catalog`，大咖优先、配角过滤）
 - [x] skill-md 技能文件与双重提示词约束（`--skill`，格式对齐 Agent Skills 标准）
-- [ ] 画面与人物动作（抽帧 + 视觉模型，外挂扩展）
+- [x] 画面与人物动作（`--visual` 抽帧 + 视觉模型，与语音字幕合并成一条时间线）
 - [ ] 服务化封装（gRPC）
 
 ## 许可证

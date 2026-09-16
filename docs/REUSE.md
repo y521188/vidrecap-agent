@@ -124,7 +124,7 @@ GitHub 代码仓库的许可是两套东西，都要看。
 | skill-md 技能配置 | [Agent Skills 开放标准](https://agentskills.io/specification)（SKILL.md + frontmatter + Markdown 正文，2025-12 起开放） | 规范公开出版 | **遵循格式、自写解析**：frontmatter 用受限平铺键值（不引 PyYAML），字段与标准兼容 |
 | 人物标签来源 | [pyannote](https://github.com/pyannote/pyannote-audio)（说话人分离事实标准） | 代码 MIT；模型 HF 门禁，接受协议后免费商用 | 外挂工具（同 faster-whisper 先例），产"谁在何时说话"，不进包依赖 |
 | 说话人+对齐一条龙 | [WhisperX](https://github.com/m-bain/whisperX)（ASR+词级时间戳+分离） | **BSD-4-Clause**（可用，含"不得用作者名义背书"条款）；分离部分实际依赖 pyannote | 备选外挂；许可证比 MIT 多一条注意项 |
-| 场景切换检测 | [PySceneDetect](https://github.com/breakthrough/pyscenedetect) | BSD-3-Clause，完全宽松 | 外挂脚本抽帧加密触发 |
+| 场景切换检测 | [PySceneDetect](https://github.com/breakthrough/pyscenedetect) | BSD-3-Clause，完全宽松 | **暂未采用**：抽帧先用 ffmpeg 固定间隔（零新增依赖、成本可估）；要"画面切换加密抽帧"再接它 |
 | 画面识字 | [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) / RapidOCR | 均 Apache-2.0，商用无忧 | 外挂件，中文强 |
 | 画面描述 | 无需复用代码：视觉模型走 OpenAI 兼容 API（Qwen-VL 系） | — | 复用现有 `OpenAICompatibleLLM` 模式加图片消息 |
 | 人物权重策略 | **无可复用项目** | — | 自研卖点：规划层纯函数 + 考卷先行 |

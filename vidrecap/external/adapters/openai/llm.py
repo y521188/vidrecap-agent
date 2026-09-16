@@ -16,6 +16,7 @@ base_url / api_key / model 支持参数与环境变量两个来源（参数优�
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import urllib.error
@@ -61,6 +62,16 @@ class OpenAICompatibleLLM:
             self._post, self._build_messages(text, instruction, system)
         )
 
+    async def describe_image(self, image: bytes, prompt: str, system: str = "") -> str:
+        """看图说话：一张图片 + 一句要求，还一段描述（OpenAI 兼容 vision 格式）。
+
+        画面分析用它：抽帧后逐帧描述"谁在做什么"。图片按 jpeg 内联成
+        data URI 发送，不需要先上传到图床。
+        """
+        return await asyncio.to_thread(
+            self._post, self._build_vision_messages(image, prompt, system)
+        )
+
     @staticmethod
     def _build_messages(
         text: str, instruction: str, system: str
@@ -72,6 +83,29 @@ class OpenAICompatibleLLM:
         if instruction:
             messages.append({"role": "user", "content": instruction})
         messages.append({"role": "user", "content": text})
+        return messages
+
+    @staticmethod
+    def _build_vision_messages(image: bytes, prompt: str, system: str) -> list[dict]:
+        """视觉消息：文本与内联图片同一条 user 消息（兼容主流 vision 接口）。"""
+        messages: list[dict] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append(
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "data:image/jpeg;base64,"
+                            + base64.b64encode(image).decode("ascii")
+                        },
+                    },
+                ],
+            }
+        )
         return messages
 
     def _post(self, messages: list[dict[str, str]]) -> str:
