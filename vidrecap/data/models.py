@@ -52,6 +52,7 @@ class RecapStats(BaseModel):
     chars_in: int = 0
     chars_out: int = 0
     corrected_count: int = 0
+    failed_shards: int = 0
     avg_quality: float | None = None
 
 
@@ -93,6 +94,15 @@ class PipelineConfig(BaseModel):
     summarize_instruction: str = Field(
         default="概括该视频片段的场景、人物与事件",
         description="分片摘要指令，用户自定义提示词的接入点",
+    )
+    max_retries: int = Field(default=3, ge=0, description="LLM 调用失败后的重试次数")
+    retry_initial_delay: float = Field(
+        default=0.5, gt=0, description="首次重试等待秒数，之后指数退避"
+    )
+    retry_backoff: float = Field(default=2.0, gt=1, description="重试等待的放大系数")
+    on_shard_failure: Literal["skip", "raise"] = Field(
+        default="skip",
+        description="重试耗尽后的失败策略：skip=跳过该分片并记入统计；raise=整个任务失败",
     )
 
     @model_validator(mode="after")

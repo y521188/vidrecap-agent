@@ -200,6 +200,8 @@ async def run_demo(args: argparse.Namespace) -> None:
     )
     if s.avg_quality is not None:
         line += f" | 修正 {s.corrected_count} 句 | 平均质量 {s.avg_quality:.2f}"
+    if s.failed_shards:
+        line += f" | 跳过 {s.failed_shards} 片（模型失败）"
     print(line)
 
 

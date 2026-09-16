@@ -246,20 +246,27 @@ SRT 解析纯标准库手写（按空行切块、正则认时间戳），不引�
 **验收**：已完成。新增 10 个测试、全库 221 个全绿；默认 demo 输出逐字节一致；
 本地假服务上端到端跑通 `--llm openai`（含无模型名时的明确报错）。
 
-### 提交 7：失败重试与降级（服务层）
+### 提交 7：失败重试与降级（服务层）✅ 已完成
 
 **目标**：真实模型会超时、会限流，单个分片失败不能炸掉整个任务，也不能静默丢内容。
 
 | 文件 | 动作 |
 |---|---|
 | `vidrecap/service/orchestrator.py` | LLM 调用包上指数退避重试（次数、初始等待可配，默认 3 次 × 0.5s 起）；重试耗尽按 `PipelineConfig` 新开关走：跳过该分片并记入 `RecapStats.failed_shards`（默认），或整体抛错 |
-| `vidrecap/data/models.py` | `PipelineConfig` 加重试参数、失败策略开关（默认值只在这里声明一次）；`RecapStats` 加 `failed_shards` |
+| `vidrecap/data/models.py` | `PipelineConfig` 加 `max_retries` / `retry_initial_delay` / `retry_backoff` / `on_shard_failure`（默认值只在这里声明一次）；`RecapStats` 加 `failed_shards` |
 | `tests/test_orchestrator.py` | 扩充：假 LLM 前 N 次抛错再成功 → 重试后成功且调用次数正确；始终抛错 → 跳过 + 统计正确；策略为抛错模式 → 整体失败 |
 
 重试手写约二十行，不引 tenacity（docs/REUSE.md 里有替换方案备着）。归属表里
 "失败重试"明确写在服务层——它是执行关切，不进规划层。
 
-**验收**：全部测试绿；默认参数下不触发重试的路径行为与改前一致。
+**实现时的边界决定**：重试只包**分片摘要**这一处调用。压缩合并阶段（`compress`
+里的 `summarize`）不加跳过——合并步骤没有"跳过一片"的语义，失败就整任务失败；
+要给它加重试，等真实使用中那里真的开始失败再说（YAGNI）。
+
+**验收**：已完成。新增 4 个测试、全库 225 个全绿；瞬时失败 1 次重试后成功
+（调用次数断言）；持续失败默认跳过并计入 `failed_shards`、概括为空不崩；
+`raise` 策略整任务失败；`max_retries=0` 时每片恰好调用一次；默认 demo 输出
+逐字节一致。
 
 ### 提交 8：断点续跑（数据层 + 服务层）
 

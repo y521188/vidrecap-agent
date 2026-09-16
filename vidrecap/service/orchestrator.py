@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from vidrecap.data.api import (
     PartialSummary,
@@ -28,6 +28,21 @@ from vidrecap.service.corrector import apply_corrections
 from vidrecap.service.sharder import shard
 
 ProgressCallback = Callable[[int, int], None]
+
+
+async def _retry(call: Callable[[], Awaitable[str]], config: PipelineConfig) -> str:
+    """指数退避重试：LLM 的超时与限流大多是暂时的，值得再敲几次门。"""
+    delay = config.retry_initial_delay
+    attempt = 0
+    while True:
+        try:
+            return await call()
+        except Exception:
+            if attempt >= config.max_retries:
+                raise
+            attempt += 1
+            await asyncio.sleep(delay)
+            delay *= config.retry_backoff
 
 
 class Orchestrator:
@@ -64,12 +79,24 @@ class Orchestrator:
         incremental_target = max(1, round(total * cfg.incremental_at))
         chars_in = sum(len(s.text) for s in shards)
 
-        async def summarize_one(s: Shard) -> PartialSummary:
+        async def summarize_one(s: Shard) -> PartialSummary | None:
             async with semaphore:
                 started = time.perf_counter()
-                summary = await self.llm.summarize(
-                    s.text, instruction=cfg.summarize_instruction
-                )
+                try:
+                    summary = await _retry(
+                        lambda: self.llm.summarize(
+                            s.text, instruction=cfg.summarize_instruction
+                        ),
+                        cfg,
+                    )
+                except Exception:
+                    if cfg.on_shard_failure == "raise":
+                        raise
+                    # 降级：放弃这片，但记账、报进度，绝不静默
+                    state["done"] += 1
+                    if self.on_progress:
+                        self.on_progress(state["done"], total)
+                    return None
                 partial = PartialSummary(shard_index=s.index, summary=summary)
                 if self.scorer is not None and self.corrector is not None:
                     # 质检也占一个并发名额：修正本身可能又是一次模型调用
@@ -96,7 +123,8 @@ class Orchestrator:
                 )
             return partial
 
-        partials = await asyncio.gather(*(summarize_one(s) for s in shards))
+        gathered = await asyncio.gather(*(summarize_one(s) for s in shards))
+        partials = [p for p in gathered if p is not None]
         recap, rounds = await self._merge(partials)
         incremental_recap = None
         if state["incremental_task"] is not None:
@@ -114,6 +142,7 @@ class Orchestrator:
             chars_in=chars_in,
             chars_out=len(recap),
             corrected_count=sum(p.corrected_count for p in partials),
+            failed_shards=total - len(partials),
             avg_quality=(sum(quality_values) / len(quality_values)) if quality_values else None,
         )
         return RecapResult(

@@ -1,4 +1,6 @@
-"""调度器集成测试：并行摘要、增量摘要触发、最终融合与统计。"""
+"""调度器集成测试：并行摘要、增量摘要触发、最终融合与统计、失败重试与降级。"""
+
+import pytest
 
 from vidrecap.data.api import PipelineConfig
 from vidrecap.external.api import DemoLLM, DemoSource
@@ -61,3 +63,66 @@ async def test_stats_consistency():
     result = await Orchestrator(DemoLLM(), config=config).run(DemoSource(hours=1.0))
     assert result.stats.chars_in > result.stats.chars_out > 0
     assert result.stats.duration_sec == 3600
+
+
+# --- 失败重试与降级 ---
+
+
+class FlakyLLM:
+    """前 fail_times 次调用抛错，之后正常出摘要——用来验证重试。"""
+
+    def __init__(self, fail_times: int) -> None:
+        self.fail_times = fail_times
+        self.calls = 0
+
+    async def summarize(self, text: str, instruction: str = "") -> str:
+        self.calls += 1
+        if self.calls <= self.fail_times:
+            raise RuntimeError("模拟模型抽风")
+        return f"摘要{self.calls}。"
+
+
+def _retry_config(**overrides) -> PipelineConfig:
+    return PipelineConfig(
+        shard_seconds=600,
+        overlap_seconds=30,
+        context_limit=1200,
+        retry_initial_delay=0.01,
+        **overrides,
+    )
+
+
+async def test_transient_failure_is_retried_and_run_succeeds():
+    llm = FlakyLLM(fail_times=1)
+    result = await Orchestrator(llm, config=_retry_config()).run(DemoSource(hours=1.0))
+    assert result.stats.failed_shards == 0
+    assert len(result.partials) == 6
+    assert llm.calls == 7  # 6 个分片 + 第 2 片撞上那 1 次失败后的重试
+
+
+async def test_exhausted_retries_skip_shards_and_record_them():
+    llm = FlakyLLM(fail_times=10**9)
+    result = await Orchestrator(llm, config=_retry_config(max_retries=1)).run(
+        DemoSource(hours=1.0)
+    )
+    assert result.stats.failed_shards == 6
+    assert result.partials == []
+    assert result.recap == ""
+    assert llm.calls == 12  # 每片原始 1 次 + 重试 1 次，全部耗尽
+
+
+async def test_raise_policy_fails_the_whole_task():
+    llm = FlakyLLM(fail_times=10**9)
+    with pytest.raises(RuntimeError, match="抽风"):
+        await Orchestrator(
+            llm, config=_retry_config(max_retries=1, on_shard_failure="raise")
+        ).run(DemoSource(hours=1.0))
+
+
+async def test_zero_retries_makes_exactly_one_call_per_shard():
+    llm = FlakyLLM(fail_times=10**9)
+    result = await Orchestrator(llm, config=_retry_config(max_retries=0)).run(
+        DemoSource(hours=1.0)
+    )
+    assert llm.calls == 6
+    assert result.stats.failed_shards == 6
