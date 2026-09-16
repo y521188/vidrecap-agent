@@ -65,6 +65,7 @@ Python 与 `python -m vidrecap` 的约定要求它们必须在包根，所以它
 | 修正执行（打分→修正→重打分→护栏→回退） | 服务层 | `service/corrector.py` |
 | 时间窗怎么切、文本怎么拆 | 规划层 | `planning/windows.py`、`planning/splits.py`、`planning/sentences.py` |
 | 该修哪几句、怎么挑 | 规划层 | `planning/corrections.py` |
+| 人物权重与配角过滤策略 | 规划层 | `planning/speakers.py` |
 | 质量打分规则 | 规则层 | `rules/quality.py` |
 | 防幻觉护栏 | 规则层 | `rules/guardrail.py` |
 | 评测基线门槛（最低可接受标准） | 规则层 | `rules/baselines.py` |
@@ -148,6 +149,7 @@ vidrecap/planning/windows.py
 vidrecap/planning/splits.py
 vidrecap/planning/sentences.py
 vidrecap/planning/corrections.py
+vidrecap/planning/speakers.py
 vidrecap/rules/__init__.py
 vidrecap/rules/api/__init__.py
 vidrecap/rules/quality.py

@@ -72,7 +72,8 @@ class DemoCatalog:
         total = int(self._duration // LINE_SECONDS)
         rows = []
         for i in range(total):
-            speaker = self._speaker_for(i)
+            # 固定位置埋一个只出现一次的群众演员——配角过滤效果的信标
+            speaker = "群众演员" if i == 17 else self._speaker_for(i)
             rng = random.Random((i * 40503) % (2**32))
             text = f"{speaker}{rng.choice(_VERBS)}{rng.choice(_TOPICS)}{_TAIL}"
             rows.append((i * LINE_SECONDS, (i + 1) * LINE_SECONDS, text, speaker))

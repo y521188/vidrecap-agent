@@ -6,7 +6,14 @@
 
 from vidrecap.planning.corrections import plan_corrections
 from vidrecap.planning.sentences import split_sentences
+from vidrecap.planning.speakers import plan_speaker_policy
 from vidrecap.planning.splits import plan_compression
 from vidrecap.planning.windows import plan_windows
 
-__all__ = ["plan_compression", "plan_corrections", "plan_windows", "split_sentences"]
+__all__ = [
+    "plan_compression",
+    "plan_corrections",
+    "plan_speaker_policy",
+    "plan_windows",
+    "split_sentences",
+]

@@ -47,6 +47,25 @@ class SpeakerProfile(BaseModel):
     appearances: int = Field(default=0, ge=0, description="出现次数（高频优先保留）")
 
 
+class SpeakerPolicyConfig(BaseModel):
+    """人物权重策略的可调参数：默认值只在这里声明一次。"""
+
+    min_share: float = Field(
+        default=0.05,
+        gt=0,
+        le=1,
+        description="常规人物台词占比低于此值视为配角过滤；大咖与无标签发言不受影响",
+    )
+
+
+class SpeakerPlan(BaseModel):
+    """人物权重策略的产出（纯数据）：服务层照此执行，不做二次判断。"""
+
+    keep: list[SubtitleLine] = Field(default_factory=list)
+    drop: list[SubtitleLine] = Field(default_factory=list)
+    dropped_speakers: list[str] = Field(default_factory=list)
+
+
 class PartialSummary(BaseModel):
     """单个分片解析完成后输出的局部摘要。
 
@@ -73,6 +92,8 @@ class RecapStats(BaseModel):
     chars_out: int = 0
     corrected_count: int = 0
     failed_shards: int = 0
+    dropped_lines: int = 0
+    dropped_speakers: list[str] = Field(default_factory=list)
     avg_quality: float | None = None
 
 

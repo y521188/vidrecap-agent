@@ -21,9 +21,18 @@ from vidrecap.data.api import (
     RecapResult,
     RecapStats,
     Shard,
+    SpeakerPlan,
+    SpeakerPolicyConfig,
     TaskStore,
 )
-from vidrecap.external.api import LLMClient, MediaSource, QualityScorer, SentenceCorrector
+from vidrecap.external.api import (
+    ContentCatalog,
+    LLMClient,
+    MediaSource,
+    QualityScorer,
+    SentenceCorrector,
+)
+from vidrecap.planning.api import plan_speaker_policy
 from vidrecap.service.compressor import compress
 from vidrecap.service.corrector import apply_corrections
 from vidrecap.service.sharder import shard
@@ -63,6 +72,8 @@ class Orchestrator:
         corrector: SentenceCorrector | None = None,
         quality_config: QualityConfig | None = None,
         store: TaskStore | None = None,
+        catalog: ContentCatalog | None = None,
+        speaker_config: SpeakerPolicyConfig | None = None,
     ) -> None:
         self.llm = llm
         self.config = config or PipelineConfig()
@@ -71,11 +82,24 @@ class Orchestrator:
         self.corrector = corrector
         self.quality_config = quality_config
         self.store = store
+        self.catalog = catalog
+        self.speaker_config = speaker_config
 
     async def run(self, source: MediaSource) -> RecapResult:
         cfg = self.config
         store = self.store
-        shards = shard(source, cfg.shard_seconds, cfg.overlap_seconds)
+        # 人物策略：计划由规划层出（大咖保留、配角过滤），本层照计划取材
+        plan: SpeakerPlan | None = None
+        if self.catalog is not None:
+            all_lines = await self.catalog.lines(0, source.duration())
+            profiles = await self.catalog.speaker_profiles()
+            plan = plan_speaker_policy(all_lines, profiles, self.speaker_config)
+        shards = shard(
+            source,
+            cfg.shard_seconds,
+            cfg.overlap_seconds,
+            lines=plan.keep if plan else None,
+        )
         total = len(shards)
         semaphore = asyncio.Semaphore(cfg.max_concurrency)
         results: dict[int, PartialSummary] = {}
@@ -158,6 +182,8 @@ class Orchestrator:
             chars_out=len(recap),
             corrected_count=sum(p.corrected_count for p in partials),
             failed_shards=total - len(partials),
+            dropped_lines=len(plan.drop) if plan else 0,
+            dropped_speakers=plan.dropped_speakers if plan else [],
             avg_quality=(sum(quality_values) / len(quality_values)) if quality_values else None,
         )
         return RecapResult(
@@ -182,6 +208,8 @@ async def run_recap(
     corrector: SentenceCorrector | None = None,
     quality_config: QualityConfig | None = None,
     store: TaskStore | None = None,
+    catalog: ContentCatalog | None = None,
+    speaker_config: SpeakerPolicyConfig | None = None,
 ) -> RecapResult:
     """任务级入口：命令行、将来的服务化封装、测试都从这里发起任务。
 
@@ -195,4 +223,6 @@ async def run_recap(
         corrector=corrector,
         quality_config=quality_config,
         store=store,
+        catalog=catalog,
+        speaker_config=speaker_config,
     ).run(source)

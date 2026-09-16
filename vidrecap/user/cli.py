@@ -20,6 +20,7 @@ import sys
 
 from vidrecap.data.api import PipelineConfig, QualityConfig, TaskStore
 from vidrecap.external.api import (
+    DemoCatalog,
     DemoCorrector,
     DemoLLM,
     DemoSource,
@@ -107,6 +108,11 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="路径",
         help="启用断点续跑：分片摘要存进该 sqlite 文件，重跑时已完成的分片不再调模型",
     )
+    demo.add_argument(
+        "--catalog",
+        action="store_true",
+        help="从后台目录取数（带人物标签）：大咖优先保留，低频配角过滤",
+    )
 
     evaluate = sub.add_parser("eval", help="跑评测集，打印成绩单（低于基线则退出码非零）")
     evaluate.add_argument(
@@ -172,11 +178,12 @@ async def run_demo(args: argparse.Namespace) -> None:
     poison_note = f" | 注毒 {args.poison:.0%}" if args.poison else ""
     quality_note = "" if args.no_correct else " | 质检修正开"
     source_note = f"字幕 {args.srt}" if args.srt else f"模拟视频 {args.hours} 小时"
+    catalog_note = " | 目录取数" if args.catalog else ""
     model_note = f" | 模型 {llm.model}" if args.llm == "openai" else ""
     print(
         f"{source_note} | 分片 {args.shard_seconds:.0f}s | "
         f"重叠缓冲 {args.overlap_seconds:.0f}s | 并行 {args.concurrency} | "
-        f"上下文上限 {args.context_limit} 字符{model_note}{poison_note}{quality_note}"
+        f"上下文上限 {args.context_limit} 字符{model_note}{catalog_note}{poison_note}{quality_note}"
     )
     on_progress: ProgressCallback = lambda done, total: print(  # noqa: E731
         f"\r{_bar(done, total)}", end="", flush=True
@@ -195,6 +202,7 @@ async def run_demo(args: argparse.Namespace) -> None:
             corrector=corrector,
             quality_config=quality_config,
             store=store,
+            catalog=DemoCatalog(hours=args.hours) if args.catalog else None,
         )
     finally:
         if store is not None:
@@ -218,6 +226,8 @@ async def run_demo(args: argparse.Namespace) -> None:
         line += f" | 修正 {s.corrected_count} 句 | 平均质量 {s.avg_quality:.2f}"
     if s.failed_shards:
         line += f" | 跳过 {s.failed_shards} 片（模型失败）"
+    if s.dropped_lines:
+        line += f" | 过滤配角 {'、'.join(s.dropped_speakers)}（{s.dropped_lines} 句）"
     print(line)
 
 
