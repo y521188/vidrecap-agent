@@ -15,12 +15,16 @@ SCORER_MIN_THRESHOLD_ACCURACY = 0.95
 SCORER_MIN_PAIRWISE_RANKING_ACCURACY = 0.95
 """（好句, 坏句）两两配对中，好句分数更高的比例下限。"""
 
-# --- 修正器（B 层考卷，待第 3 次提交出题后校准）---
+# --- 修正器（B 层考卷 corrector_v1，15 条）---
+# 首次实测：修正成功率 12/12、其余三项满分，故定在 0.80 留出余量。
 CORRECTOR_MIN_FIX_RATE = 0.80
-"""修正后重新打分能过阈值的比例下限。"""
+"""该修的句子里，修完能达标的比例下限。"""
 
 CORRECTOR_MIN_NO_HALLUCINATION_RATE = 1.00
-"""不留幻觉的比例下限——由护栏保证，必须是满分。"""
+"""不留幻觉的比例下限——由护栏回退机制保证，必须是满分。"""
 
 CORRECTOR_MIN_NO_REGRESSION_RATE = 1.00
 """不把句子改得更差的比例下限——越改越糟还不如不改。"""
+
+CORRECTOR_MIN_NOOP_SAFETY_RATE = 1.00
+"""本来达标的句子不被乱动的比例下限——不该修的别去修。"""

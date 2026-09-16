@@ -162,6 +162,7 @@ vidrecap/external/adapters/demo/__init__.py
 vidrecap/external/adapters/demo/llm.py
 vidrecap/external/adapters/demo/source.py
 vidrecap/external/adapters/demo/corrector.py
+vidrecap/external/adapters/demo/text.py
 vidrecap/monitor/__init__.py
 vidrecap/monitor/api/__init__.py
 vidrecap/monitor/evals/__init__.py
@@ -205,15 +206,13 @@ vidrecap/monitor/evals/runner.py
 已完成：七层骨架与窗口、时间窗规划、二分递归压缩、并行调度与增量摘要、离线 demo、
 分层 CI 硬检查（跨层引用、窗口纯净、纯判断层、一层一文件夹、文档清单新鲜度、窗口可导入）、
 **规则层三指标打分器与达标判定**（清晰度/通顺度/完整度 + 阈值 + 单项一票否决）、
-**评测集与跑分**（49 条手写考卷、指标、`vidrecap eval`、CI 基线门槛 0.95/0.95）。
+**评测集与跑分**（49 条手写考卷、指标、`vidrecap eval`、CI 基线门槛 0.95/0.95）、
+**语义修正回路**（拆句→打分→计划→修正→重打分→护栏→回退，B 层考卷 15 条，四项基线达标）。
 
-骨架已就位、待填实现：`rules/guardrail.py`（护栏）、`planning/sentences.py` 与
-`planning/corrections.py`、`service/corrector.py`、`external/adapters/demo/corrector.py`、
-`monitor/evals/` 里的修正器部分（B 层考卷、`corrector_metrics`、`run_corrector_eval`）。
-骨架函数体一律是 `raise NotImplementedError("待第 N 次提交实现：…")`。
+骨架已就位、待填实现：`monitor/evals/scenarios.py`（端到端场景，见 ROADMAP 提交 4）。
+剩余骨架函数体一律是 `raise NotImplementedError("待第 N 次提交实现：…")`。
 
-**下一步做什么、验收标准是什么，看 [docs/ROADMAP.md](docs/ROADMAP.md)**：
-提交 3 语义修正 → 提交 4 注毒与端到端。
+**下一步做什么、验收标准是什么，看 [docs/ROADMAP.md](docs/ROADMAP.md)**：提交 4 注毒与端到端。
 
 更远：真实大模型适配器、SRT/ASR 媒体源、失败重试与降级、任务持久化、gRPC 服务化；
 选型与许可证红线见 [docs/REUSE.md](docs/REUSE.md)。

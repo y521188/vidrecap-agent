@@ -109,7 +109,7 @@
 
 ---
 
-## 提交 3：语义修正（规划 / 服务 / 规则 / 数据 联动）
+## 提交 3：语义修正（规划 / 服务 / 规则 / 数据 联动）✅ 已完成
 
 **目标**：低于阈值的句子被修正，且**绝不引入原文没有的事实**。
 
@@ -117,36 +117,32 @@
 
 | 文件 | 动作 |
 |---|---|
-| `vidrecap/planning/sentences.py` | 填实现：共享断句纯函数 |
-| `vidrecap/planning/corrections.py` | 填实现：`plan_corrections`（挑低于阈值的句子） |
-| `vidrecap/rules/guardrail.py` | 填实现：实体抽取 + 忠实性校验 |
-| `vidrecap/service/corrector.py` | 填实现：拆句 → 打分 → 按计划修正 → 重打分 → 护栏 → 回退 |
-| `vidrecap/service/orchestrator.py` | 接入：`scorer` / `corrector` 可选参数（默认 None） |
-| `vidrecap/data/models.py` | 补 `PartialSummary.avg_quality` / `corrected_count`、`RecapStats` 汇总字段 |
-| `vidrecap/monitor/evals/cases/corrector_v1.jsonl` | 新建：约 15 条修正考卷 |
-| `vidrecap/monitor/evals/*` | 填实现：修正器指标与跑分器 |
-| `tests/test_corrector.py` | 新建：护栏拦截、回退、好句不动 |
+| `vidrecap/planning/sentences.py` | 已实现：共享断句纯函数（外部层有一份等价副本，对照测试守住一致性） |
+| `vidrecap/planning/corrections.py` | 已实现：按规则层达标判定挑出待修句，原因写进计划 |
+| `vidrecap/rules/guardrail.py` | 已实现：实体抽取 + 忠实性校验（原文片段拼装核对，容忍连接字与一字之差） |
+| `vidrecap/service/corrector.py` | 已实现：拆句 → 打分 → 按计划修正 → 重打分 → 护栏 → 回退 |
+| `vidrecap/service/orchestrator.py` | 已接入：`scorer` / `corrector` / `quality_config` 可选参数（默认 None，行为不变） |
+| `vidrecap/data/models.py` | 已补 `PartialSummary.avg_quality` / `corrected_count`、`RecapStats` 汇总字段 |
+| `vidrecap/monitor/evals/cases/corrector_v1.jsonl` | 新建：15 条修正考卷（12 该修 + 3 不该动的对照） |
+| `vidrecap/monitor/evals/*` | 已实现：修正器指标与跑分器（**直接跑线上编排**，不是另写评测版） |
+| `vidrecap/external/adapters/demo/corrector.py` | 已实现：抽取式确定性修正器（**从提交 4 提前**，没有它修正链路无法演示） |
+| `tests/test_corrector.py` | 新建 20 个测试：断句一致性、计划、护栏、回退、降级、流水线接入 |
 
-**执行流程**（服务层只执行、不发明策略）
+**回退优先原则**（已实现并测住）：护栏不过、修正器抛异常、或分数没变好——
+一律保留原句。无幻觉率、不倒退率、好句不动率三项基线因此都是满分，靠机制保证。
 
-1. 规划层 `split_sentences` 拆句；
-2. 规则层打分器逐句打分；
-3. 规划层 `plan_corrections` 给出"修哪几句"的计划；
-4. 服务层按计划调修正器（外部层插座），修正结果重打分；
-5. 规则层护栏校验：**有原文外实体，或分数没变好 → 回退原句**；
-6. 重组摘要，记录平均分与修正条数。
+**首次实测**：修正成功率 12/12、无幻觉率 100%、不倒退率 100%、好句不动率 100%。
 
-**回退优先原则**：宁可保留原样，也不接受"改出新事实"或"越改越糟"。
-这条决定了修正器的成绩单里"无幻觉率"和"不倒退率"必须是满分。
+**实现时被考卷抓出的真问题**（评测第一次发挥价值）：corr-011 的连读句修正后
+被护栏误判越界——根因是"整句 34 字被当成一个实体"，拼装核对只差末尾一个字
+就整体判负。修法是**拼接核对容忍至多一个对不上的字**（那是分词边界，不是捏造），
+两个以上对不上才算越界。顺手把该题加长到 50 字以上，让它真正走到修正路径。
 
-**测试清单**：护栏能抓出凭空捏造的实体、放过正常改写；好句送进去原样返回；
-修正结果变差时回退；修正器抛异常时不炸整条流水线（降级保留原句）；
-**不传 scorer/corrector 时行为与提交前逐字节一致**（demo 输出对比）。
+**已知局限**（文档写明，测试锁住）：同义改写（原文"缺席"、修正写"没到场"）
+仍会被护栏误判回退——宁严勿松是有意的；真实场景换模型档护栏，见 docs/REUSE.md。
 
-**验收**：修正成功率 ≥ 0.80、无幻觉率 = 100%、不倒退率 = 100%（`rules/baselines.py`）；
-默认关闭修正时，`vidrecap demo` 输出与提交前逐字节一致。
-
-**不做什么**：不改前端提示词、不接真实模型、不动压缩与分片逻辑。
+**验收**：全部达成；`vidrecap demo` 输出与提交前逐字节一致。
+**不做什么**：不改提示词、不接真实模型、不动压缩与分片逻辑。
 
 ---
 
@@ -159,7 +155,6 @@
 | 文件 | 动作 |
 |---|---|
 | `vidrecap/external/adapters/demo/source.py` | 新增 `poison_rate` 参数：确定性注毒 |
-| `vidrecap/external/adapters/demo/corrector.py` | 填实现：抽取式确定性修正器 |
 | `vidrecap/monitor/evals/scenarios.py` | 新建：端到端场景与属性断言 |
 | `vidrecap/user/cli.py` | 新增 `--poison` / `--no-correct` / `--threshold` / `--weights` |
 | `README.md`、`docs/ARCHITECTURE.md`、`AGENTS.md` | 更新架构图、状态与清单 |

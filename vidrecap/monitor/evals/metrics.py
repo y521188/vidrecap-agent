@@ -117,5 +117,52 @@ def scorer_metrics(
 
 
 def corrector_metrics(outcomes: list[CorrectionOutcome]) -> CorrectorMetrics:
-    """把逐条修正结果打包成修正器成绩单（成功率 / 无幻觉率 / 不倒退率）。"""
-    raise NotImplementedError("待第 3 次提交实现：修正器成绩单")
+    """把逐条修正结果打包成修正器成绩单。
+
+    四条指标的口径：
+
+    - **修正成功率**：只统计"本来不达标"的句子，看修完有多少达标；
+    - **无幻觉率**：结果里没有原文外实体的比例（护栏回退机制保证满分）；
+    - **不倒退率**：修正后分数不低于修正前的比例（同上）；
+    - **好句不动率**：本来达标的句子里，没有被改动的比例。
+
+    某个口径下没有对应用例时按满分处理——没有可犯的错，就不该扣分。
+    """
+    if not outcomes:
+        raise ValueError("没有修正结果，无法计算指标")
+
+    needed = [outcome for outcome in outcomes if outcome.needed_fix]
+    already_fine = [outcome for outcome in outcomes if not outcome.needed_fix]
+
+    fix_rate = (
+        sum(1 for outcome in needed if outcome.passed_after) / len(needed)
+        if needed
+        else 1.0
+    )
+    noop_safety_rate = (
+        sum(1 for outcome in already_fine if not outcome.changed) / len(already_fine)
+        if already_fine
+        else 1.0
+    )
+    no_hallucination_rate = sum(1 for o in outcomes if not o.hallucinated) / len(outcomes)
+    no_regression_rate = sum(1 for o in outcomes if o.score_after >= o.score_before) / len(
+        outcomes
+    )
+
+    misses = [
+        outcome.case_id
+        for outcome in outcomes
+        if outcome.hallucinated
+        or outcome.missing_entities
+        or (outcome.needed_fix and not outcome.passed_after)
+        or (not outcome.needed_fix and outcome.changed)
+    ]
+
+    return CorrectorMetrics(
+        case_count=len(outcomes),
+        fix_rate=fix_rate,
+        no_hallucination_rate=no_hallucination_rate,
+        no_regression_rate=no_regression_rate,
+        noop_safety_rate=noop_safety_rate,
+        misses=misses,
+    )

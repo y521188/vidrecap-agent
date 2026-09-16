@@ -28,11 +28,17 @@ class Shard(BaseModel):
 
 
 class PartialSummary(BaseModel):
-    """单个分片解析完成后输出的局部摘要。"""
+    """单个分片解析完成后输出的局部摘要。
+
+    avg_quality / corrected_count 由质检回路回填；没启用打分时保持原样
+    （avg_quality 为 None、corrected_count 为 0），保证老行为不受影响。
+    """
 
     shard_index: int
     summary: str
     elapsed_sec: float = 0.0
+    avg_quality: float | None = None
+    corrected_count: int = 0
 
 
 class RecapStats(BaseModel):
@@ -45,6 +51,8 @@ class RecapStats(BaseModel):
     incremental_at: float
     chars_in: int = 0
     chars_out: int = 0
+    corrected_count: int = 0
+    avg_quality: float | None = None
 
 
 class RecapResult(BaseModel):

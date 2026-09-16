@@ -195,7 +195,14 @@ def test_agents_md_lists_only_existing_files():
     block = re.search(r"<!--\s*files:begin\s*-->(.*?)<!--\s*files:end\s*-->", text, re.S)
     assert block, "AGENTS.md 里必须有 <!-- files:begin --> ... <!-- files:end --> 受检清单"
 
-    listed = re.findall(r"vidrecap/[\w./]+\.py", block.group(1))
+    listed = set(re.findall(r"vidrecap/[\w./]+\.py", block.group(1)))
     assert listed, "受检清单里没有列出任何文件"
     missing = [p for p in listed if not (REPO_ROOT / p).exists()]
     assert not missing, f"AGENTS.md 列了不存在的文件：{missing}"
+
+    actual = {p.relative_to(REPO_ROOT).as_posix() for p in _package_files()}
+    unlisted = sorted(actual - listed)
+    assert not unlisted, (
+        f"这些源码文件没登记进 AGENTS.md 的受检清单：{unlisted}"
+        "——新增文件必须同步文档，否则后续 agent 找不到规矩"
+    )

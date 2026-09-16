@@ -2,6 +2,10 @@
 
 本层只负责执行：参数从数据层的 PipelineConfig 来，分片窗口从规划层来，
 压缩也交给规划层决策 + 本层递归。这里没有任何"策略数字"。
+
+质检回路（可选）：传入 scorer 与 corrector 后，每个分片的局部摘要产出后
+立刻过一遍"按句打分 → 低分修正 → 重打分 → 护栏"，不过关的句子回退原样。
+不传这两个参数时行为与从前完全一致——质检是加法，不是改动。
 """
 
 from __future__ import annotations
@@ -10,9 +14,17 @@ import asyncio
 import time
 from collections.abc import Callable
 
-from vidrecap.data.api import PartialSummary, PipelineConfig, RecapResult, RecapStats, Shard
-from vidrecap.external.api import LLMClient, MediaSource
+from vidrecap.data.api import (
+    PartialSummary,
+    PipelineConfig,
+    QualityConfig,
+    RecapResult,
+    RecapStats,
+    Shard,
+)
+from vidrecap.external.api import LLMClient, MediaSource, QualityScorer, SentenceCorrector
 from vidrecap.service.compressor import compress
+from vidrecap.service.corrector import apply_corrections
 from vidrecap.service.sharder import shard
 
 ProgressCallback = Callable[[int, int], None]
@@ -31,10 +43,16 @@ class Orchestrator:
         llm: LLMClient,
         config: PipelineConfig | None = None,
         on_progress: ProgressCallback | None = None,
+        scorer: QualityScorer | None = None,
+        corrector: SentenceCorrector | None = None,
+        quality_config: QualityConfig | None = None,
     ) -> None:
         self.llm = llm
         self.config = config or PipelineConfig()
         self.on_progress = on_progress
+        self.scorer = scorer
+        self.corrector = corrector
+        self.quality_config = quality_config
 
     async def run(self, source: MediaSource) -> RecapResult:
         cfg = self.config
@@ -52,10 +70,20 @@ class Orchestrator:
                 summary = await self.llm.summarize(
                     s.text, instruction="概括该视频片段的场景、人物与事件"
                 )
-                partial = PartialSummary(
-                    shard_index=s.index,
-                    summary=summary,
-                    elapsed_sec=time.perf_counter() - started,
+                partial = PartialSummary(shard_index=s.index, summary=summary)
+                if self.scorer is not None and self.corrector is not None:
+                    # 质检也占一个并发名额：修正本身可能又是一次模型调用
+                    partial = (
+                        await apply_corrections(
+                            [partial],
+                            {s.index: s.text},
+                            self.scorer,
+                            self.corrector,
+                            self.quality_config,
+                        )
+                    )[0]
+                partial = partial.model_copy(
+                    update={"elapsed_sec": time.perf_counter() - started}
                 )
             results[s.index] = partial
             state["done"] += 1
@@ -74,6 +102,7 @@ class Orchestrator:
         if state["incremental_task"] is not None:
             incremental_recap, _ = await state["incremental_task"]
 
+        quality_values = [p.avg_quality for p in partials if p.avg_quality is not None]
         stats = RecapStats(
             duration_sec=source.duration(),
             shard_count=total,
@@ -84,6 +113,8 @@ class Orchestrator:
             incremental_at=cfg.incremental_at,
             chars_in=chars_in,
             chars_out=len(recap),
+            corrected_count=sum(p.corrected_count for p in partials),
+            avg_quality=(sum(quality_values) / len(quality_values)) if quality_values else None,
         )
         return RecapResult(
             recap=recap, partials=partials, incremental_recap=incremental_recap, stats=stats
@@ -103,9 +134,19 @@ async def run_recap(
     llm: LLMClient,
     config: PipelineConfig | None = None,
     on_progress: ProgressCallback | None = None,
+    scorer: QualityScorer | None = None,
+    corrector: SentenceCorrector | None = None,
+    quality_config: QualityConfig | None = None,
 ) -> RecapResult:
     """任务级入口：命令行、将来的服务化封装、测试都从这里发起任务。
 
     三条入口走同一个门，行为才不会各走各的。
     """
-    return await Orchestrator(llm, config=config, on_progress=on_progress).run(source)
+    return await Orchestrator(
+        llm,
+        config=config,
+        on_progress=on_progress,
+        scorer=scorer,
+        corrector=corrector,
+        quality_config=quality_config,
+    ).run(source)

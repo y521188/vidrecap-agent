@@ -6,9 +6,7 @@
 
 from __future__ import annotations
 
-import re
-
-_SPLIT_RE = re.compile(r"(?<=[。！？])")
+from vidrecap.external.adapters.demo.text import split_sentences
 
 
 class DemoLLM:
@@ -19,7 +17,7 @@ class DemoLLM:
 
     async def summarize(self, text: str, instruction: str = "") -> str:
         self.calls += 1
-        sentences = [s for s in (p.strip() for p in _SPLIT_RE.split(text)) if s]
+        sentences = split_sentences(text)
         kept = sentences[::2] if len(sentences) > 4 else sentences
         summary = "".join(kept)
         cap = max(60, min(len(text) // 3, 400))

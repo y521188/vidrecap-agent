@@ -78,11 +78,20 @@ class CorrectionOutcome(BaseModel):
     case_id: str
     score_before: float
     score_after: float
+    needed_fix: bool
+    """修正前是否不达标——只有这类用例才谈得上"修正成功"。"""
+
+    passed_after: bool
+    """修正后是否达标。"""
+
     changed: bool
-    """修正器是否真的改动了这句话。"""
+    """句子是否真的被改动了。"""
 
     hallucinated: list[str] = Field(default_factory=list)
-    """护栏抠出的"原文里没有的实体"；非空即视为幻觉。"""
+    """护栏抠出的"原文里没有依据"的实体；非空即视为幻觉。"""
+
+    missing_entities: list[str] = Field(default_factory=list)
+    """标准答案要求保留、但结果里丢了的实体。"""
 
 
 class CorrectorMetrics(BaseModel):
@@ -90,16 +99,16 @@ class CorrectorMetrics(BaseModel):
 
     case_count: int
     fix_rate: float
-    """修完能过阈值的比例。"""
+    """该修的句子里，修完能达标的比例。"""
 
     no_hallucination_rate: float
     """没有出现幻觉实体的比例（基线要求满分）。"""
 
     no_regression_rate: float
-    """修正后分数没有变差的比例。"""
+    """修正后分数没有变差的比例（基线要求满分）。"""
 
     noop_safety_rate: float
-    """好句送进去不被乱改的比例。"""
+    """本来达标的句子没被乱动的比例（基线要求满分）。"""
 
     misses: list[str] = Field(default_factory=list)
 

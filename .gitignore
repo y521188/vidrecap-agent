@@ -223,6 +223,9 @@ __marimo__/
 # local agent session artifacts
 .zcode/
 
+# codegraph 本地代码索引（每台机器各建一份，不进库）
+.codegraph/
+
 # ===== 以下为本项目专项：本地素材、跑出来的结果、私密配置 =====
 
 # 素材（客户视频/音频/字幕，体量大且含隐私，一律不进库）
