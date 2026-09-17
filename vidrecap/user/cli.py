@@ -3,12 +3,13 @@
 零依赖体验：python -m vidrecap demo
 （使用内置离线假数据，不需要任何 API Key）
 
-两个命令：
+三个命令：
 - ``demo`` 用假数据跑通全流程；
-- ``eval`` 跑评测集出成绩单，低于基线时以非零码退出（可以直接当门禁用）。
+- ``eval`` 跑评测集出成绩单，低于基线时以非零码退出（可以直接当门禁用）；
+- ``serve`` 以 HTTP 服务常驻，供其他系统调用。
 
-本文件是"装配根"：具体用哪个适配器、参数怎么给，只在这里组装一次；
-命令行只做参数覆盖，不重复声明默认值（默认值在数据层的两个 Config）。
+本文件是"装配根"的入口：适配器选型在 user/assembly.py（服务端共用同一份），
+命令行只做参数覆盖，不重复声明默认值（默认值在数据层的那几个 Config）。
 对外入口由 user/api 窗口挂出。
 """
 
@@ -25,17 +26,11 @@ from vidrecap.data.api import (
     SpeakerPolicyConfig,
     TaskStore,
 )
-from vidrecap.external.api import (
-    DemoCatalog,
-    DemoCorrector,
-    DemoLLM,
-    DemoSource,
-    OpenAICompatibleLLM,
-    SrtSource,
-)
+from vidrecap.external.api import DemoCatalog
 from vidrecap.monitor.api import EvalReport, baseline_checks, run_eval
-from vidrecap.rules.api import HeuristicScorer
 from vidrecap.service.api import ProgressCallback, run_recap
+from vidrecap.user.assembly import build_config, build_llm, build_quality, build_source
+from vidrecap.user.server import serve
 from vidrecap.user.skills import load_skill
 
 
@@ -137,62 +132,49 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument(
         "--threshold", type=float, default=None, help="覆盖判定阈值（默认 0.7）"
     )
+
+    serve_parser = sub.add_parser(
+        "serve", help="以 HTTP 服务常驻：POST /recap 流式返回进度与结果（零依赖）"
+    )
+    serve_parser.add_argument(
+        "--host", default="127.0.0.1", help="监听地址（默认仅本机；对外请自行加鉴权与反代）"
+    )
+    serve_parser.add_argument("--port", type=int, default=8080, help="监听端口")
     return parser
 
 
 def _build_config(
     args: argparse.Namespace, skill: SkillConfig | None = None
 ) -> PipelineConfig:
-    """把命令行参数覆盖到配置上；优先级：命令行 > 技能文件 > 默认值。"""
-    overrides: dict[str, object] = {}
+    """命令行参数覆盖到配置上；优先级：命令行 > 技能文件 > 默认值。"""
     instruction = args.instruction or (skill.summarize_instruction if skill else "")
-    if instruction:
-        overrides["summarize_instruction"] = instruction
-    if skill is not None and skill.system_prompt:
-        overrides["system_prompt"] = skill.system_prompt
-    return PipelineConfig(
+    return build_config(
         shard_seconds=args.shard_seconds,
         overlap_seconds=args.overlap_seconds,
         max_concurrency=args.concurrency,
         context_limit=args.context_limit,
-        **overrides,
+        instruction=instruction or None,
+        system_prompt=skill.system_prompt if skill else None,
     )
 
 
 def _build_quality(args: argparse.Namespace, skill: SkillConfig | None = None):
-    """装配质检回路：打分器、修正器与它们的配置；--no-correct 时全部为 None。
-
-    阈值与权重的优先级：命令行 > 技能文件 > 配置默认值。
-    """
-    if args.no_correct:
-        return None, None, None
-
-    threshold = args.threshold if args.threshold is not None else (skill.threshold if skill else None)
-    weights = args.weights if args.weights is not None else (skill.weights if skill else None)
-    overrides = {}
-    if threshold is not None:
-        overrides["threshold"] = threshold
-    if weights is not None:
-        overrides.update(
-            clarity_weight=weights[0],
-            fluency_weight=weights[1],
-            completeness_weight=weights[2],
-        )
-    config = QualityConfig(**overrides) if overrides else None
-    return HeuristicScorer(config), DemoCorrector(), config
+    """质检回路；阈值与权重的优先级：命令行 > 技能文件 > 默认值。"""
+    return build_quality(
+        disabled=args.no_correct,
+        threshold=args.threshold if args.threshold is not None else (skill.threshold if skill else None),
+        weights=args.weights if args.weights is not None else (skill.weights if skill else None),
+    )
 
 
 async def run_demo(args: argparse.Namespace) -> None:
     if args.srt and args.poison:
         raise SystemExit("--srt 与 --poison 不能同时使用：注毒只对内置模拟数据有意义")
     skill = load_skill(args.skill) if args.skill else None
-    if args.llm == "openai":
-        try:
-            llm = OpenAICompatibleLLM(model=args.model)
-        except ValueError as exc:
-            raise SystemExit(str(exc))
-    else:
-        llm = DemoLLM()
+    try:
+        llm = build_llm(args.llm, args.model)
+    except ValueError as exc:
+        raise SystemExit(str(exc))
     store = (
         TaskStore(args.store, namespace=f"{args.llm}:{args.model or ''}")
         if args.store
@@ -214,10 +196,7 @@ async def run_demo(args: argparse.Namespace) -> None:
     on_progress: ProgressCallback = lambda done, total: print(  # noqa: E731
         f"\r{_bar(done, total)}", end="", flush=True
     )
-    if args.srt:
-        source = SrtSource(args.srt)
-    else:
-        source = DemoSource(hours=args.hours, poison_rate=args.poison)
+    source = build_source(args.srt, args.hours, args.poison)
     try:
         result = await run_recap(
             source,
@@ -306,6 +285,9 @@ async def run_eval_command(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
+    if args.command == "serve":
+        serve(args.host, args.port)
+        return
     if args.command == "eval":
         sys.exit(asyncio.run(run_eval_command(args)))
     asyncio.run(run_demo(args))

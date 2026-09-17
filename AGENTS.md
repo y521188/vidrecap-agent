@@ -59,7 +59,7 @@ Python 与 `python -m vidrecap` 的约定要求它们必须在包根，所以它
 | 要做的功能 | 写到哪层 | 落点 |
 |---|---|---|
 | 命令行命令、参数、输出展示 | 用户层 | `user/cli.py` |
-| 装配具体适配器（决定用哪个模型/媒体源） | 用户层（唯一装配根） | `user/cli.py` |
+| 装配具体适配器（决定用哪个模型/媒体源） | 用户层（唯一装配根） | `user/assembly.py`（命令与服务端共用） |
 | 任务级入口、并行调度、增量摘要、失败重试 | 服务层 | `service/orchestrator.py` |
 | 按窗取内容、递归调模型这类"动作" | 服务层 | `service/sharder.py`、`service/compressor.py` |
 | 修正执行（打分→修正→重打分→护栏→回退） | 服务层 | `service/corrector.py` |
@@ -73,7 +73,7 @@ Python 与 `python -m vidrecap` 的约定要求它们必须在包根，所以它
 | 真实大模型 / ASR / 字幕文件的接入 | 外部层 | `external/adapters/<厂商>/` |
 | 插座接口（新增一类外部能力） | 外部层 | `external/protocols.py` |
 | 考卷数据、加载、指标、跑分 | 监控层 | `monitor/evals/`（用例结构留本层 `schemas.py`） |
-| 将来的 gRPC / HTTP 服务端 | 用户层 | `user/`（新子目录） |
+| HTTP 服务端（gRPC 待有对接方再换实现） | 用户层 | `user/server/` |
 | 任务持久化、断点续跑 | 数据层 | `data/`（新模块） |
 
 ---
@@ -138,6 +138,9 @@ vidrecap/user/__init__.py
 vidrecap/user/api/__init__.py
 vidrecap/user/cli.py
 vidrecap/user/skills.py
+vidrecap/user/assembly.py
+vidrecap/user/server/__init__.py
+vidrecap/user/server/server.py
 vidrecap/service/__init__.py
 vidrecap/service/api/__init__.py
 vidrecap/service/orchestrator.py
@@ -223,11 +226,12 @@ vidrecap/monitor/evals/runner.py
 **阶段二：真实接入**（SRT 字幕源 `--srt`、OpenAI 兼容模型 `--llm openai`、
 用户自定义提示词 `--instruction`、分片失败重试与降级、断点续跑 `--store`）、
 **阶段三：JD 对齐**（后台目录取数与人物权重 `--catalog`、skill-md 技能文件与
-双重提示词约束 `--skill`、画面与人物动作 `--visual` 抽帧 + 视觉模型）。
+双重提示词约束 `--skill`、画面与人物动作 `--visual` 抽帧 + 视觉模型、
+HTTP 服务化外壳 `vidrecap serve`）。
 
-ROADMAP 的提交 1–12 全部完成，仓库内不再有 `raise NotImplementedError` 骨架。
+ROADMAP 的提交 1–13 全部完成，仓库内不再有 `raise NotImplementedError` 骨架。
 
-**更远的方向**（gRPC 服务化、监控导出、场景切换加密抽帧、ASR 包内适配器）
+**更远的方向**（gRPC 版服务、监控导出、场景切换加密抽帧、ASR 包内适配器）
 见 [docs/ROADMAP.md](docs/ROADMAP.md) 与 [docs/REUSE.md](docs/REUSE.md)。
 
 更远：真实大模型适配器、SRT/ASR 媒体源、失败重试与降级、任务持久化、gRPC 服务化；

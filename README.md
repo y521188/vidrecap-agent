@@ -46,6 +46,11 @@ python scripts/video2recap.py 节目.mp4 --visual --vision-model qwen-vl-max --l
 # 技能文件（skill-md）：System Prompt 与摘要策略一起声明，命令行参数优先
 python -m vidrecap demo --srt 节目.srt --skill skills/新闻摘要.md
 
+# 起服务：其他系统通过 HTTP 调用，进度用 SSE 边跑边推（零依赖，默认只绑本机）
+python -m vidrecap serve --port 8080
+curl -N -X POST http://127.0.0.1:8080/recap -H "Content-Type: application/json" \
+  -d '{"srt": "节目.srt", "llm": "openai", "model": "deepseek-chat"}'
+
 # 从后台目录取数（带人物标签）：大咖优先保留，低频配角过滤
 python -m vidrecap demo --catalog --hours 3
 
@@ -165,7 +170,8 @@ python -m vidrecap eval --suite all
 - [x] 后台目录取数与人物权重（`--catalog`，大咖优先、配角过滤）
 - [x] skill-md 技能文件与双重提示词约束（`--skill`，格式对齐 Agent Skills 标准）
 - [x] 画面与人物动作（`--visual` 抽帧 + 视觉模型，与语音字幕合并成一条时间线）
-- [ ] 服务化封装（gRPC）
+- [x] HTTP 服务化外壳（`vidrecap serve`，`POST /recap` 流式推进度；gRPC 待有对接方再换实现）
+- [ ] 监控指标导出与告警
 
 ## 许可证
 
