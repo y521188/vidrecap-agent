@@ -56,7 +56,9 @@ from vidrecap.data.api import (
 )
 from vidrecap.external.api import (
     DemoCatalog,
+    Diarizer,
     Transcriber,
+    apply_speakers,
     extract_frames,
     merge_tracks,
     to_srt_text,
@@ -64,6 +66,7 @@ from vidrecap.external.api import (
 from vidrecap.service.api import run_recap
 from vidrecap.user.assembly import (
     build_config,
+    build_diarizer,
     build_llm,
     build_quality,
     build_source,
@@ -95,6 +98,7 @@ class RecapRequest(BaseModel):
     画面轨四件套：visual（开画面分析，只对视频生效）、frame_interval /
     max_frames（抽帧密度与成本上限，默认与外挂脚本一致 120 秒 / 200 帧）、
     vision_model（视觉模型名，留空=同摘要模型；demo 引擎用离线演示描述）。
+    diarize（说话人分离）：声纹聚类分出说话人并给字幕贴标签，只对视频生效。
     这是服务的信任边界，逐字段校验：坏参数回 400，不进流水线。
     """
 
@@ -106,6 +110,7 @@ class RecapRequest(BaseModel):
     video: str | None = None
     language: str | None = None
     visual: bool = False
+    diarize: bool = False
     frame_interval: float = Field(default=120.0, gt=0)
     max_frames: int = Field(default=200, gt=0)
     vision_model: str | None = None
@@ -136,12 +141,15 @@ def _quality_from(request: RecapRequest, skill) -> tuple:
 
 
 async def _run_job(
-    request: RecapRequest, send, transcriber: Transcriber | None
+    request: RecapRequest,
+    send,
+    transcriber: Transcriber | None,
+    diarizer: Diarizer | None,
 ) -> RecapResult:
     """装配后交给服务层；进度回调转成 SSE 事件推给调用方。
 
-    带视频时先转写（阻塞活放线程池，进度照样边转边推），转出的字幕
-    当内联文本走同一个入口——后面的流水线对"字幕哪来的"一无所知。
+    带视频时三步走：转写 →（可选）说话人分离贴标签 →（可选）画面轨，
+    转出的字幕当内联文本走同一个入口——后面的流水线对"字幕哪来的"一无所知。
     """
     srt_text = request.srt_text
     if request.video is not None:
@@ -161,6 +169,20 @@ async def _run_job(
         )
         if not entries:
             raise ValueError("没从文件里识别到任何语音（静音片段或不是音视频文件？）")
+        if request.diarize:
+            if diarizer is None:
+                raise ValueError(
+                    "服务端未装配说话人分离：装 sherpa-onnx 后重启服务"
+                )
+
+            def _separating(done: int, total: int) -> None:
+                send(
+                    "progress",
+                    {"stage": "分人", "done": done, "total": max(total, 1)},
+                )
+
+            turns = await asyncio.to_thread(diarizer.diarize, request.video, _separating)
+            entries = apply_speakers(entries, turns)
         if request.visual:
             visual_events = await _visual_events(request, send)
             if visual_events:
@@ -305,6 +327,12 @@ class _Handler(BaseHTTPRequestHandler):
                 {"message": "画面分析（visual）只对视频文件生效，请上传视频"}, status=400
             )
             return
+        if request.diarize and request.video is None:
+            self._send_json(
+                {"message": "说话人分离（diarize）只对视频/音频文件生效，请上传文件"},
+                status=400,
+            )
+            return
         if not _JOBS.acquire(blocking=False):
             self._send_json({"message": f"服务忙（同时最多 {_MAX_JOBS} 个任务），稍后再试"}, status=429)
             return
@@ -353,7 +381,9 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
         try:
-            result = asyncio.run(_run_job(request, self._event, self.server.transcriber))
+            result = asyncio.run(
+                _run_job(request, self._event, self.server.transcriber, self.server.diarizer)
+            )
         except Exception as exc:
             self._event("error", {"message": str(exc)})
             return
@@ -378,6 +408,7 @@ class _Handler(BaseHTTPRequestHandler):
             catalog=request.catalog,
             no_correct=request.no_correct,
             visual=request.visual,
+            diarize=request.diarize,
             recap=result.recap,
             stats=result.stats,
         )
@@ -408,17 +439,19 @@ def build_server(
     port: int = 8080,
     history: HistoryStore | None = None,
     transcriber: Transcriber | None = None,
+    diarizer: Diarizer | None = None,
 ) -> ThreadingHTTPServer:
     """造好服务实例但不起线程——测试用它拿随机端口。
 
-    history 为 None 时查询接口仍在、恒回空列表；transcriber 为 None 时
-    视频入口直接报错指路（测试默认两者皆无，不落盘、不装模型）。
+    history 为 None 时查询接口仍在、恒回空列表；transcriber / diarizer 为
+    None 时对应入口直接报错指路（测试默认全部不装配，不落盘、不装模型）。
     是否启用由调用方（常驻入口 / 命令行）决定。
     """
     server = ThreadingHTTPServer((host, port), _Handler)
     server.daemon_threads = True
     server.history = history
     server.transcriber = transcriber
+    server.diarizer = diarizer
     return server
 
 
@@ -427,9 +460,12 @@ def serve(
     port: int = 8080,
     history: HistoryStore | None = None,
     transcriber: Transcriber | None = None,
+    diarizer: Diarizer | None = None,
 ) -> None:
     """常驻监听；Ctrl+C 结束。默认只绑本机（不含鉴权，对外请加反代）。"""
-    server = build_server(host, port, history=history, transcriber=transcriber)
+    server = build_server(
+        host, port, history=history, transcriber=transcriber, diarizer=diarizer
+    )
     # flush：日志重定向到文件时是块缓冲，启动提示不能憋在缓冲区里
     print(f"vidrecap 服务已启动: http://{host}:{port}", flush=True)
     print(

@@ -18,9 +18,9 @@ from vidrecap.user.assembly import build_llm
 
 
 @contextlib.contextmanager
-def _running_server(history: HistoryStore | None = None, transcriber=None):
-    """起在本机回环的临时端口上，用完即关。历史与转写默认不装配，要测就显式传。"""
-    server = build_server("127.0.0.1", 0, history=history, transcriber=transcriber)
+def _running_server(history: HistoryStore | None = None, transcriber=None, diarizer=None):
+    """起在本机回环的临时端口上，用完即关。历史/转写/分人默认不装配，要测就显式传。"""
+    server = build_server("127.0.0.1", 0, history=history, transcriber=transcriber, diarizer=diarizer)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         yield server.server_address[1]
@@ -302,8 +302,53 @@ def test_video_with_no_speech_reports_error_event():
 def test_visual_without_video_is_400():
     with _running_server() as port:
         status, body = _request(port, "POST", "/recap", {"visual": True})
+        diarize_status, diarize_body = _request(port, "POST", "/recap", {"diarize": True})
     assert status == 400
     assert "视频" in body
+    assert diarize_status == 400
+    assert "视频" in diarize_body
+
+
+class _FakeDiarizer:
+    """测试替身：两句字幕正好换一次说话人。"""
+
+    def __init__(self):
+        self.calls = []
+
+    def diarize(self, path, on_progress=None):
+        self.calls.append(path)
+        if on_progress is not None:
+            on_progress(1, 1)
+        return [(0.0, 2.0, "说话人1"), (2.0, 4.0, "说话人2")]
+
+
+def test_diarize_labels_recap_and_archives(tmp_path):
+    diarizer = _FakeDiarizer()
+    with _running_server(
+        history=HistoryStore(tmp_path / "history.jsonl"),
+        transcriber=_FakeTranscriber(),
+        diarizer=diarizer,
+    ) as port:
+        events = _stream_events(port, {"video": "demo.mp4", "diarize": True, "no_correct": True})
+        _, history_body = _request(port, "GET", "/history")
+
+    kinds = [kind for kind, _ in events]
+    assert kinds[-1] == "result"
+    recap = events[-1][1]["recap"]
+    assert "说话人1：张伟介绍了新产品的核心功能。" in recap
+    assert "说话人2：他演示了三个使用场景。" in recap
+    stages = [data.get("stage") for kind, data in events if kind == "progress"]
+    assert "分人" in stages
+    assert diarizer.calls == ["demo.mp4"]
+    record = json.loads(history_body)["records"][0]
+    assert record["diarize"] is True
+
+
+def test_diarize_without_diarizer_reports_error_event():
+    with _running_server(transcriber=_FakeTranscriber()) as port:  # 只装转写，不装分人
+        events = _stream_events(port, {"video": "demo.mp4", "diarize": True})
+    assert events[-1][0] == "error"
+    assert "说话人分离" in events[-1][1]["message"]
 
 
 def test_visual_track_merges_into_recap(tmp_path, monkeypatch):

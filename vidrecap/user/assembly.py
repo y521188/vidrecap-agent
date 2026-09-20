@@ -15,11 +15,13 @@ from vidrecap.external.api import (
     DemoLLM,
     DemoSource,
     DemoVisionDescriber,
+    Diarizer,
     LLMClient,
     MediaSource,
     OpenAICompatibleLLM,
     QualityScorer,
     SentenceCorrector,
+    SherpaDiarizer,
     SrtSource,
     Transcriber,
     VisionDescriber,
@@ -66,6 +68,11 @@ def build_vision(
     if kind == "openai":
         return OpenAICompatibleLLM(model=model, base_url=base_url, api_key=api_key)
     return DemoVisionDescriber()
+
+
+def build_diarizer(threshold: float = 0.5) -> Diarizer:
+    """说话人分离装配：sherpa-onnx 可选依赖，模型延迟加载/下载（与转写器同款待遇）。"""
+    return SherpaDiarizer(threshold)
 
 
 def build_source(

@@ -32,10 +32,12 @@ from vidrecap.monitor.api import EvalReport, baseline_checks, run_eval
 from vidrecap.service.api import ProgressCallback, run_recap
 from vidrecap.user.assembly import (
     build_config,
+    build_diarizer,
     build_llm,
     build_quality,
     build_source,
     build_transcriber,
+    build_vision,
 )
 from vidrecap.user.server import serve
 from vidrecap.user.skills import load_skill
@@ -314,7 +316,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "serve":
         history = None if args.no_history else HistoryStore(args.history)
         transcriber = None if args.no_whisper else build_transcriber(args.whisper_model)
-        serve(args.host, args.port, history, transcriber)
+        serve(args.host, args.port, history, transcriber, build_diarizer())
         return
     if args.command == "eval":
         sys.exit(asyncio.run(run_eval_command(args)))

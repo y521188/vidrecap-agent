@@ -125,6 +125,7 @@
       <div class="check"><input type="checkbox" id="noCorrect">关闭语义修正回路</div>
       <div class="check"><input type="checkbox" id="catalog">带人物目录与配角过滤（示例目录）</div>
       <div class="check"><input type="checkbox" id="visual">画面分析（选视频时生效：抽帧请视觉模型描述人物动作，并入时间线）</div>
+      <div class="check"><input type="checkbox" id="diarize">说话人分离（选视频时生效：声纹分出说话人，字幕带"说话人N："标签）</div>
       <label>视觉模型名（画面分析用；留空=同摘要模型，demo 引擎用离线演示描述）</label>
       <input type="text" id="visionModel" placeholder="例如 glm-4v-flash / gpt-4o-mini">
       <label>质量阈值 threshold（0~1，留空用默认）</label>
@@ -190,6 +191,7 @@ $("go").addEventListener("click", async () => {
   if ($("noCorrect").checked) body.no_correct = true;
   if ($("catalog").checked) body.catalog = true;
   if ($("visual").checked) body.visual = true;
+  if ($("diarize").checked) body.diarize = true;
   if ($("visual").checked && $("visionModel").value.trim()) body.vision_model = $("visionModel").value.trim();
   if ($("threshold").value !== "") body.threshold = parseFloat($("threshold").value);
   if ($("store").value.trim()) body.store = $("store").value.trim();
@@ -353,7 +355,7 @@ function rowHtml(record) {
   const source = record.source_name ? esc(record.source_name) : "内置示例";
   const engine = record.llm === "openai" ? ("模型 " + (esc(record.model) || "openai")) : "离线示例";
   const minutes = Math.round((record.stats.duration_sec || 0) / 60);
-  const badges = (record.visual ? " ｜ 画面" : "") + (record.no_correct ? "" : " ｜ 修正");
+  const badges = (record.visual ? " ｜ 画面" : "") + (record.diarize ? " ｜ 分人" : "") + (record.no_correct ? "" : " ｜ 修正");
   return '<div class="hrow" data-id="' + esc(record.id) + '">'
     + '<span class="when">' + esc(when) + '</span>'
     + '<span class="src">' + source + '</span>'

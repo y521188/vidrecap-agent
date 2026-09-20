@@ -35,6 +35,7 @@ class RunRecord(BaseModel):
     catalog: bool = False
     no_correct: bool = False
     visual: bool = False
+    diarize: bool = False
     recap: str
     stats: RecapStats
 

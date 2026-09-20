@@ -93,6 +93,21 @@ class VisionDescriber(Protocol):
 
 
 @runtime_checkable
+class Diarizer(Protocol):
+    """说话人分离插座：给媒体文件路径，还"谁在什么时间段说话"。
+
+    返回 (开始秒, 结束秒, 说话人标签) 列表，标签形如"说话人1"——声纹聚类
+    的产物，不含真名。on_progress(已处理块数, 总块数) 可选。
+    """
+
+    def diarize(
+        self,
+        path: str,
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> list[tuple[float, float, str]]: ...
+
+
+@runtime_checkable
 class QualityScorer(Protocol):
     """质量打分：给一句话和它所在片段的原文，还一个三指标评分。
 
