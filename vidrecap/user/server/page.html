@@ -88,6 +88,7 @@
       <option value="">——选一个自动填——</option>
       <option data-url="https://api.deepseek.com/v1" data-model="deepseek-chat">DeepSeek</option>
       <option data-url="https://open.bigmodel.cn/api/paas/v4" data-model="glm-4-flash">智谱 BigModel</option>
+      <option data-url="https://dashscope.aliyuncs.com/compatible-mode/v1" data-model="qwen-plus">阿里通义千问</option>
       <option data-url="https://api.openai.com/v1" data-model="gpt-4o-mini">OpenAI</option>
       <option data-url="http://127.0.0.1:11434/v1" data-model="qwen2.5:7b">本地 Ollama</option>
     </select>
@@ -127,7 +128,7 @@
       <div class="check"><input type="checkbox" id="visual">画面分析（选视频时生效：抽帧请视觉模型描述人物动作，并入时间线）</div>
       <div class="check"><input type="checkbox" id="diarize">说话人分离（选视频时生效：声纹分出说话人，字幕带"说话人N："标签）</div>
       <label>视觉模型名（画面分析用；留空=同摘要模型，demo 引擎用离线演示描述）</label>
-      <input type="text" id="visionModel" placeholder="例如 glm-4v-flash / gpt-4o-mini">
+      <input type="text" id="visionModel" placeholder="例如 qwen-vl-plus / glm-4v-flash / gpt-4o-mini">
       <label>质量阈值 threshold（0~1，留空用默认）</label>
       <input type="number" id="threshold" min="0" max="1" step="0.05">
       <label>断点续跑存储目录 store（留空不启用）</label>

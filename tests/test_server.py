@@ -127,6 +127,9 @@ def test_root_serves_console_page():
     assert status == 200
     assert "<html" in body.lower()
     assert "操作台" in body
+    # 服务商预设是用户直接面对的配置面：四家云端 + 本地 Ollama 都得在
+    for needle in ("api.deepseek.com", "open.bigmodel.cn", "dashscope.aliyuncs.com", "api.openai.com", "11434"):
+        assert needle in body, f"预设缺失: {needle}"
 
 
 _MINI_SRT = (
