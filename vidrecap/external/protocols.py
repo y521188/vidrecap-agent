@@ -98,12 +98,17 @@ class Diarizer(Protocol):
 
     返回 (开始秒, 结束秒, 说话人标签) 列表，标签形如"说话人1"——声纹聚类
     的产物，不含真名。on_progress(已处理块数, 总块数) 可选。
+
+    speech_spans 是可选的"已知有人说话的时段"（来自转写）：给了就只对
+    这些时段做聚类（whisperX 套路），音乐/静音段不进声纹——时间轴仍是
+    原音频的，调用方无感。
     """
 
     def diarize(
         self,
         path: str,
         on_progress: Callable[[int, int], None] | None = None,
+        speech_spans: list[tuple[float, float]] | None = None,
     ) -> list[tuple[float, float, str]]: ...
 
 

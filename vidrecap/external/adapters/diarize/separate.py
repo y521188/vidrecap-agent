@@ -4,6 +4,12 @@
 同一堆就是同一个人。**只分出"说话人1/2/3"，不认真名**——把聚类对上真名
 （声纹登记或按内容推断）是另一件事，见 docs/ROADMAP.md 远期路线。
 
+**语音段裁剪（whisperX 套路）**：调用方把转写得到的"哪些时段有人说话"
+（``speech_spans``）传进来时，只裁出这些段（前后留余量、相邻合并）拼接后
+做聚类——音乐/音效段从源头不进声纹，避免被当成"说话人"过分裂（提交 16
+在音乐占大头的片子上实测分出约 20 人的教训）。拼接流里算出的时间用线性
+映射映回原音频时间轴，对外接口不变。
+
 sherpa-onnx 与 faster-whisper 同待遇：**可选依赖、不进 vidrecap 的依赖清单**，
 没装时报错指路。两个模型文件首次使用时自动下载到 ``.vidrecap/models/``
 （约 6MB + 40MB）；音频解码复用 ffmpeg 解析链（系统 ffmpeg → imageio-ffmpeg）。
@@ -107,6 +113,64 @@ def _decode_mono_16k(path: str | Path):
     return np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
 
 
+_SPEECH_PAD_SECONDS = 0.3  # 语音段前后各留一点余量，别把起音/收音掐掉
+_SAMPLE_RATE = 16_000
+
+
+def _padded_spans(
+    spans: list[tuple[float, float]],
+    pad: float = _SPEECH_PAD_SECONDS,
+    limit: float | None = None,
+) -> list[tuple[float, float]]:
+    """语音段加余量、合并重叠、按时间排序；limit 把越界尾巴截在总时长内。"""
+    adjusted: list[tuple[float, float]] = []
+    for start, end in spans:
+        start = max(0.0, start - pad)
+        end = end + pad
+        if limit is not None:
+            end = min(end, limit)
+        if end > start:
+            adjusted.append((start, end))
+    adjusted.sort()
+    merged: list[list[float]] = []
+    for start, end in adjusted:
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return [(start, end) for start, end in merged]
+
+
+def _map_concat_time(point: float, mapping: list[tuple[float, float, float]]) -> float:
+    """拼接流里的时间点映回原音频时间轴。
+
+    mapping 每项是 (拼接流内该段起点秒, 原音频内该段起点秒, 该段时长秒)；
+    点落在段与段的接缝上归前段，越界尾巴贴最后一段终点。
+    """
+    for concat_start, orig_start, duration in mapping:
+        if point <= concat_start + duration + 1e-6:
+            return orig_start + (point - concat_start)
+    return mapping[-1][1] + mapping[-1][2]
+
+
+def _crop_to_spans(samples, spans: list[tuple[float, float]]) -> tuple:
+    """按语音段裁剪样本并拼接；返回 (拼接样本, 段映射表)。"""
+    import numpy as np  # numpy 随 sherpa-onnx 一起装，这里用前才引
+
+    chunks = []
+    mapping: list[tuple[float, float, float]] = []
+    cursor = 0.0
+    for start, end in spans:
+        chunk = samples[int(start * _SAMPLE_RATE) : int(end * _SAMPLE_RATE)]
+        if len(chunk) == 0:
+            continue
+        duration = len(chunk) / _SAMPLE_RATE
+        mapping.append((cursor, start, duration))
+        chunks.append(chunk)
+        cursor += duration
+    return np.concatenate(chunks), mapping
+
+
 class SherpaDiarizer:
     """实现 external.protocols.Diarizer（形状对上即可，无需继承）。
 
@@ -122,6 +186,7 @@ class SherpaDiarizer:
         self,
         path: str | Path,
         on_progress: Callable[[int, int], None] | None = None,
+        speech_spans: list[tuple[float, float]] | None = None,
     ) -> list[tuple[float, float, str]]:
         try:
             import sherpa_onnx
@@ -132,6 +197,11 @@ class SherpaDiarizer:
             ) from exc
 
         samples = _decode_mono_16k(path)
+        mapping: list[tuple[float, float, float]] = []
+        if speech_spans:
+            spans = _padded_spans(speech_spans, limit=len(samples) / _SAMPLE_RATE)
+            if spans:
+                samples, mapping = _crop_to_spans(samples, spans)
         if self._pipeline is None:
             segmentation = _ensure_model(
                 _SEGMENTATION_URL, _MODELS_DIR / "pyannote-segmentation-3-0.onnx"
@@ -159,10 +229,14 @@ class SherpaDiarizer:
             return 0  # 返回非零会中止，这里永远继续
 
         result = self._pipeline.process(samples, _callback)
-        return [
-            (float(seg.start), float(seg.end), f"说话人{int(seg.speaker) + 1}")
-            for seg in result.sort_by_start_time()
-        ]
+        turns: list[tuple[float, float, str]] = []
+        for seg in result.sort_by_start_time():
+            start, end = float(seg.start), float(seg.end)
+            if mapping:  # 拼接流时间映回原音频时间轴
+                start = _map_concat_time(start, mapping)
+                end = max(_map_concat_time(end, mapping), start)
+            turns.append((start, end, f"说话人{int(seg.speaker) + 1}"))
+        return turns
 
 
 def apply_speakers(

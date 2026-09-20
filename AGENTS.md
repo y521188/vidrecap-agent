@@ -244,11 +244,12 @@ HTTP 服务化外壳 `vidrecap serve`——GET `/` 自带浏览器操作台
 画面行带 `〖画面〗` 前缀并入字幕轨、离线演示描述器零 Key 可跑、真实描述走
 OpenAI 兼容视觉模型）；
 **说话人分离**（`diarize` 适配器：sherpa-onnx 声纹聚类——可选依赖、模型免令牌
-自动下载（https 白名单域 + 重定向逐跳校验）、字幕按最长重叠贴"说话人N："标签）；
+自动下载（https 白名单域 + 重定向逐跳校验）、转写句段裁剪后只对语音聚类（词级
+时间戳收紧 + 时间轴映射回原片，whisperX 套路）、字幕按最长重叠贴"说话人N："标签）；
 成功任务自动进历史档案（`data/history.py`，默认 `.vidrecap/history.jsonl`，
 `--no-history` 可关），操作台历史区列表回看、点详情取单条概括）。
 
-ROADMAP 的提交 1–16 全部完成，仓库内不再有 `raise NotImplementedError` 骨架。
+ROADMAP 的提交 1–17 全部完成，仓库内不再有 `raise NotImplementedError` 骨架。
 
 **更远的方向**（gRPC 版服务、监控导出、场景切换加密抽帧、ASR 包内适配器）
 见 [docs/ROADMAP.md](docs/ROADMAP.md) 与 [docs/REUSE.md](docs/REUSE.md)。

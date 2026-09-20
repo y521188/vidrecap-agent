@@ -60,11 +60,20 @@ class WhisperTranscriber:
         # 中文给个初始提示让它带出标点（口径与 video2recap 外挂脚本一致）
         prompt = "以下是普通话的句子，请带上标点。" if language == "zh" else None
         segments, info = self._model.transcribe(
-            str(path), language=language, vad_filter=True, initial_prompt=prompt
+            str(path),
+            language=language,
+            vad_filter=True,
+            initial_prompt=prompt,
+            word_timestamps=True,  # 词级对齐：句子的起止收紧到真实语音范围
         )
         entries: list[tuple[float, float, str]] = []
         for segment in segments:
-            entries.append((segment.start, segment.end, segment.text))
+            # 句级时间戳在长静音处会被拉得极长（实测一句标了 217 秒，其实
+            # 大部分是配乐）——按首尾词的实测时间收紧，供说话人分离当语音段用
+            words = getattr(segment, "words", None)
+            start = words[0].start if words else segment.start
+            end = words[-1].end if words else segment.end
+            entries.append((start, end, segment.text))
             if on_progress is not None:
-                on_progress(segment.end, info.duration or 0.0)
+                on_progress(end, info.duration or 0.0)
         return entries

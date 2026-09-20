@@ -310,13 +310,15 @@ def test_visual_without_video_is_400():
 
 
 class _FakeDiarizer:
-    """测试替身：两句字幕正好换一次说话人。"""
+    """测试替身：两句字幕正好换一次说话人，并记下传进来的语音段。"""
 
     def __init__(self):
         self.calls = []
+        self.spans = None
 
-    def diarize(self, path, on_progress=None):
+    def diarize(self, path, on_progress=None, speech_spans=None):
         self.calls.append(path)
+        self.spans = speech_spans
         if on_progress is not None:
             on_progress(1, 1)
         return [(0.0, 2.0, "说话人1"), (2.0, 4.0, "说话人2")]
@@ -340,6 +342,7 @@ def test_diarize_labels_recap_and_archives(tmp_path):
     stages = [data.get("stage") for kind, data in events if kind == "progress"]
     assert "分人" in stages
     assert diarizer.calls == ["demo.mp4"]
+    assert diarizer.spans == [(0.0, 2.0), (2.0, 4.0)]  # 转写句段原样传给分离器
     record = json.loads(history_body)["records"][0]
     assert record["diarize"] is True
 

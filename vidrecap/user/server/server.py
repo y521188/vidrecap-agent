@@ -181,7 +181,12 @@ async def _run_job(
                     {"stage": "分人", "done": done, "total": max(total, 1)},
                 )
 
-            turns = await asyncio.to_thread(diarizer.diarize, request.video, _separating)
+            turns = await asyncio.to_thread(
+                diarizer.diarize,
+                request.video,
+                _separating,
+                [(start, end) for start, end, _ in entries],  # 只对转写出的语音段聚类
+            )
             entries = apply_speakers(entries, turns)
         if request.visual:
             visual_events = await _visual_events(request, send)
