@@ -545,6 +545,34 @@ sintel.mp4 字幕带"说话人N："标签（含上述过分裂局限）。
 
 ---
 
+## 提交 18：方言识别引擎——SenseVoice 双引擎装配 ✅ 已完成
+
+补方言短板（whisper 对粤语/四川话等识别率断崖）：接入 SenseVoice
+（FunASR 生态、Apache-2.0，中/粤/英/日/韩）作第二识别引擎。**零新增依赖**——
+经 sherpa-onnx 的 ONNX 导出运行（说话人分离已在用的库），模型三件
+（int8 约 230MB + tokens + Silero VAD）首次使用自动下载，走提交 16 的白名单通道。
+
+| 文件 | 动作 |
+|---|---|
+| `vidrecap/external/adapters/sensevoice/transcribe.py` | 新建：`SenseVoiceTranscriber` 实现 `Transcriber` 插座。SenseVoice 不出时间戳 → 先 Silero VAD 窗口循环切人声段、逐段识别、段起点即时间戳（音乐/静音挡在识别外）；语言令牌映射 auto/zh/yue/en |
+| `vidrecap/user/assembly.py` | `build_transcriber` → `build_transcribers`：两套引擎一起装配（都延迟加载，启动零成本），请求按名字挑 |
+| `vidrecap/user/server/server.py` | `RecapRequest.asr`（请求级引擎选择，默认 whisper；装配缺席时报错指路） |
+| `vidrecap/user/server/page.html` | 识别引擎下拉（Whisper / SenseVoice） |
+| `vidrecap/user/cli.py` | `--no-whisper` 文案更新；引擎选择从启动旗标改为请求字段（页面即点即用） |
+| tests | `test_sensevoice.py`（协议形状 + VAD 切段逻辑——假 VAD 验证余量合并/最小语音时长丢弃） |
+
+**设计取舍**：引擎选择从"启动旗标"改成"请求字段"——转写器本来就延迟加载，
+双引擎同装零成本，页面切换不用重启服务；whisper 仍是默认（普通话/英文够用），
+方言素材选 SenseVoice。Qwen3-ASR（22 种方言、云端）记入远期。
+
+**验收**：全库 325 通过、1 跳过；真机：SenseVoice 官方中文样例 VAD 切段
+准确、识别文本正确。**粤语对比实测**（官方 yue.mp3 样例，5 秒）：
+SenseVoice 转"几个字都表达**唔**到我想讲**嘅**意思"（保留方言虚词 唔/嘅），
+whisper tiny 转成书面化"表达**不到**…**的**意思"（方言特征丢失）——
+后者对后续"人物语气/方言风味"的分析是信息损失；两引擎耗时相当（4s）。
+
+---
+
 ## 更远的路线（阶段四及以后，先不展开）
 
 | 功能 | 落哪层 | 说明 |

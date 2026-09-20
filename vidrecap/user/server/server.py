@@ -95,6 +95,7 @@ class RecapRequest(BaseModel):
     （选中的字幕文件名，只进历史档案当标签，不参与计算）。
     另有两个视频专有字段：video（POST /upload 返回的服务端路径，先语音
     转写字幕再进流水线）与 language（视频语音语言，空=自动检测）。
+    asr 是转写引擎：whisper（默认，普通话/英文）或 sensevoice（方言/多语种）。
     画面轨四件套：visual（开画面分析，只对视频生效）、frame_interval /
     max_frames（抽帧密度与成本上限，默认与外挂脚本一致 120 秒 / 200 帧）、
     vision_model（视觉模型名，留空=同摘要模型；demo 引擎用离线演示描述）。
@@ -109,6 +110,7 @@ class RecapRequest(BaseModel):
     srt_name: str | None = None
     video: str | None = None
     language: str | None = None
+    asr: Literal["whisper", "sensevoice"] = "whisper"
     visual: bool = False
     diarize: bool = False
     frame_interval: float = Field(default=120.0, gt=0)
@@ -143,20 +145,23 @@ def _quality_from(request: RecapRequest, skill) -> tuple:
 async def _run_job(
     request: RecapRequest,
     send,
-    transcriber: Transcriber | None,
+    transcribers: dict[str, Transcriber] | None,
     diarizer: Diarizer | None,
 ) -> RecapResult:
     """装配后交给服务层；进度回调转成 SSE 事件推给调用方。
 
     带视频时三步走：转写 →（可选）说话人分离贴标签 →（可选）画面轨，
     转出的字幕当内联文本走同一个入口——后面的流水线对"字幕哪来的"一无所知。
+    转写引擎按请求里的 asr 字段挑（whisper=普通话/英文，sensevoice=方言）。
     """
     srt_text = request.srt_text
     if request.video is not None:
-        if transcriber is None:
+        if not transcribers:
             raise ValueError(
-                "服务端未装配语音识别：装 faster-whisper 后重启，或用 --no-whisper 明确关闭"
+                "服务端未装配语音识别：装 faster-whisper / sherpa-onnx 后重启，"
+                "或用 --no-whisper 明确关闭"
             )
+        transcriber = transcribers.get(request.asr) or transcribers["whisper"]
 
         def _transcribing(done: float, total: float) -> None:
             send(
@@ -387,7 +392,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             result = asyncio.run(
-                _run_job(request, self._event, self.server.transcriber, self.server.diarizer)
+                _run_job(request, self._event, self.server.transcribers, self.server.diarizer)
             )
         except Exception as exc:
             self._event("error", {"message": str(exc)})
@@ -443,19 +448,19 @@ def build_server(
     host: str = "127.0.0.1",
     port: int = 8080,
     history: HistoryStore | None = None,
-    transcriber: Transcriber | None = None,
+    transcribers: dict[str, Transcriber] | None = None,
     diarizer: Diarizer | None = None,
 ) -> ThreadingHTTPServer:
     """造好服务实例但不起线程——测试用它拿随机端口。
 
-    history 为 None 时查询接口仍在、恒回空列表；transcriber / diarizer 为
-    None 时对应入口直接报错指路（测试默认全部不装配，不落盘、不装模型）。
+    history 为 None 时查询接口仍在、恒回空列表；transcribers / diarizer
+    缺席时对应入口直接报错指路（测试默认全部不装配，不落盘、不装模型）。
     是否启用由调用方（常驻入口 / 命令行）决定。
     """
     server = ThreadingHTTPServer((host, port), _Handler)
     server.daemon_threads = True
     server.history = history
-    server.transcriber = transcriber
+    server.transcribers = transcribers
     server.diarizer = diarizer
     return server
 
@@ -464,12 +469,12 @@ def serve(
     host: str = "127.0.0.1",
     port: int = 8080,
     history: HistoryStore | None = None,
-    transcriber: Transcriber | None = None,
+    transcribers: dict[str, Transcriber] | None = None,
     diarizer: Diarizer | None = None,
 ) -> None:
     """常驻监听；Ctrl+C 结束。默认只绑本机（不含鉴权，对外请加反代）。"""
     server = build_server(
-        host, port, history=history, transcriber=transcriber, diarizer=diarizer
+        host, port, history=history, transcribers=transcribers, diarizer=diarizer
     )
     # flush：日志重定向到文件时是块缓冲，启动提示不能憋在缓冲区里
     print(f"vidrecap 服务已启动: http://{host}:{port}", flush=True)

@@ -36,7 +36,7 @@ from vidrecap.user.assembly import (
     build_llm,
     build_quality,
     build_source,
-    build_transcriber,
+    build_transcribers,
     build_vision,
 )
 from vidrecap.user.server import serve
@@ -166,7 +166,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve_parser.add_argument(
         "--no-whisper",
         action="store_true",
-        help="关闭视频入口（页面只收字幕文件；faster-whisper 是可选依赖）",
+        help="关闭视频入口（页面只收字幕文件；识别库均为可选依赖）",
     )
     return parser
 
@@ -315,8 +315,10 @@ def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     if args.command == "serve":
         history = None if args.no_history else HistoryStore(args.history)
-        transcriber = None if args.no_whisper else build_transcriber(args.whisper_model)
-        serve(args.host, args.port, history, transcriber, build_diarizer())
+        transcribers = (
+            None if args.no_whisper else build_transcribers(args.whisper_model)
+        )
+        serve(args.host, args.port, history, transcribers, build_diarizer())
         return
     if args.command == "eval":
         sys.exit(asyncio.run(run_eval_command(args)))

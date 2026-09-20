@@ -13,6 +13,7 @@ from vidrecap.external.adapters.demo import (
 from vidrecap.external.adapters.diarize import SherpaDiarizer, apply_speakers
 from vidrecap.external.adapters.openai import OpenAICompatibleLLM
 from vidrecap.external.adapters.srt import SrtSource
+from vidrecap.external.adapters.sensevoice import SenseVoiceTranscriber
 from vidrecap.external.adapters.visual import (
     DemoVisionDescriber,
     VISUAL_PREFIX,
@@ -47,6 +48,7 @@ __all__ = [
     "SentenceCorrector",
     "SherpaDiarizer",
     "SrtSource",
+    "SenseVoiceTranscriber",
     "Transcriber",
     "VISUAL_PREFIX",
     "VisionDescriber",

@@ -108,6 +108,11 @@
     <input type="file" id="srtFile" accept=".srt,.txt,video/*,audio/*,.mkv,.flv,.ts">
     <p class="hint">选视频/音频：上传后服务端自动语音转文字再概括（需服务端装 faster-whisper）；
        选 .srt/.txt：直接当字幕用；都不选则用内置示例数据试跑链路。</p>
+    <label>识别引擎（选视频/音频时生效）</label>
+    <select id="asrEngine">
+      <option value="whisper">Whisper——普通话/英文为主</option>
+      <option value="sensevoice">SenseVoice——方言（粤语等）与多语种</option>
+    </select>
     <label>视频语音语言（选了视频/音频才生效）</label>
     <select id="language">
       <option value="">自动检测</option>
@@ -207,6 +212,7 @@ $("go").addEventListener("click", async () => {
     }
   }
   if ($("language").value) body.language = $("language").value;
+  body.asr = $("asrEngine").value;
 
   $("error").style.display = "none";
   $("result").style.display = "none";

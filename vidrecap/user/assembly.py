@@ -20,6 +20,7 @@ from vidrecap.external.api import (
     MediaSource,
     OpenAICompatibleLLM,
     QualityScorer,
+    SenseVoiceTranscriber,
     SentenceCorrector,
     SherpaDiarizer,
     SrtSource,
@@ -47,13 +48,18 @@ def build_llm(
     return DemoLLM()
 
 
-def build_transcriber(model_size: str = "tiny") -> Transcriber:
-    """视频入口的语音识别装配；模型延迟加载，装配本身永远是轻的。
+def build_transcribers(
+    whisper_model: str = "tiny",
+) -> dict[str, Transcriber]:
+    """两套语音识别一起装配（都是延迟加载，启动零成本）：请求按名字挑。
 
-    真正缺 faster-whisper 要到第一次转写才报错（带安装指路）——
-    服务启动时只造个壳，不拖慢、不强制装。
+    - whisper：普通话/英文为主，faster-whisper；
+    - sensevoice：方言（粤语等）与多语种，sherpa-onnx + Silero VAD 切段。
     """
-    return WhisperTranscriber(model_size)
+    return {
+        "whisper": WhisperTranscriber(whisper_model),
+        "sensevoice": SenseVoiceTranscriber(),
+    }
 
 
 def build_vision(

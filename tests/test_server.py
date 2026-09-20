@@ -18,9 +18,9 @@ from vidrecap.user.assembly import build_llm
 
 
 @contextlib.contextmanager
-def _running_server(history: HistoryStore | None = None, transcriber=None, diarizer=None):
+def _running_server(history: HistoryStore | None = None, transcribers=None, diarizer=None):
     """起在本机回环的临时端口上，用完即关。历史/转写/分人默认不装配，要测就显式传。"""
-    server = build_server("127.0.0.1", 0, history=history, transcriber=transcriber, diarizer=diarizer)
+    server = build_server("127.0.0.1", 0, history=history, transcribers=transcribers, diarizer=diarizer)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         yield server.server_address[1]
@@ -269,7 +269,7 @@ def test_recap_from_uploaded_video_uses_transcriber(tmp_path):
     """视频路径：先转写（进度带"转写"阶段标记）再进流水线，语言原样传给适配器。"""
     transcriber = _FakeTranscriber()
     with _running_server(
-        history=HistoryStore(tmp_path / "history.jsonl"), transcriber=transcriber
+        history=HistoryStore(tmp_path / "history.jsonl"), transcribers={"whisper": transcriber}
     ) as port:
         events = _stream_events(
             port, {"video": "D:/tmp/fake.mp4", "language": "zh", "srt_name": "会议.mp4"}
@@ -296,7 +296,7 @@ def test_video_without_transcriber_reports_error_event():
 
 def test_video_with_no_speech_reports_error_event():
     silent = _FakeTranscriber(entries=[])
-    with _running_server(transcriber=silent) as port:
+    with _running_server(transcribers={"whisper": silent}) as port:
         events = _stream_events(port, {"video": "silence.mp4"})
     assert events[-1][0] == "error"
     assert "识别到任何语音" in events[-1][1]["message"]
@@ -331,7 +331,7 @@ def test_diarize_labels_recap_and_archives(tmp_path):
     diarizer = _FakeDiarizer()
     with _running_server(
         history=HistoryStore(tmp_path / "history.jsonl"),
-        transcriber=_FakeTranscriber(),
+        transcribers={"whisper": _FakeTranscriber()},
         diarizer=diarizer,
     ) as port:
         events = _stream_events(port, {"video": "demo.mp4", "diarize": True, "no_correct": True})
@@ -351,7 +351,7 @@ def test_diarize_labels_recap_and_archives(tmp_path):
 
 
 def test_diarize_without_diarizer_reports_error_event():
-    with _running_server(transcriber=_FakeTranscriber()) as port:  # 只装转写，不装分人
+    with _running_server(transcribers={"whisper": _FakeTranscriber()}) as port:  # 只装转写，不装分人
         events = _stream_events(port, {"video": "demo.mp4", "diarize": True})
     assert events[-1][0] == "error"
     assert "说话人分离" in events[-1][1]["message"]
@@ -374,7 +374,7 @@ def test_visual_track_merges_into_recap(tmp_path, monkeypatch):
         "vidrecap.user.server.server.extract_frames", _fake_extract
     )
     with _running_server(
-        history=HistoryStore(tmp_path / "history.jsonl"), transcriber=_FakeTranscriber()
+        history=HistoryStore(tmp_path / "history.jsonl"), transcribers={"whisper": _FakeTranscriber()}
     ) as port:
         events = _stream_events(
             port, {"video": "demo.mp4", "visual": True, "no_correct": True}
