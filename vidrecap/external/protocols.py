@@ -82,6 +82,17 @@ class Transcriber(Protocol):
 
 
 @runtime_checkable
+class VisionDescriber(Protocol):
+    """视觉描述插座：给一张图的字节和一句要求，还一句画面描述。
+
+    真实实现走 OpenAI 兼容接口的视觉模型；离线演示版只做确定性占位，
+    让"抽帧 → 描述 → 并轨"没有钥匙也能全链路跑通。
+    """
+
+    async def describe_image(self, image: bytes, prompt: str) -> str: ...
+
+
+@runtime_checkable
 class QualityScorer(Protocol):
     """质量打分：给一句话和它所在片段的原文，还一个三指标评分。
 

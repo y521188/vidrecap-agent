@@ -54,19 +54,30 @@ from vidrecap.data.api import (
     SpeakerPolicyConfig,
     TaskStore,
 )
-from vidrecap.external.api import DemoCatalog, Transcriber, to_srt_text
+from vidrecap.external.api import (
+    DemoCatalog,
+    Transcriber,
+    extract_frames,
+    merge_tracks,
+    to_srt_text,
+)
 from vidrecap.service.api import run_recap
 from vidrecap.user.assembly import (
     build_config,
     build_llm,
     build_quality,
     build_source,
+    build_vision,
 )
 from vidrecap.user.skills import load_skill
 
 _MAX_JOBS = 2
 _JOBS = threading.BoundedSemaphore(_MAX_JOBS)
 _MAX_UPLOAD_BYTES = 2 * 1024**3  # 2GB：本地工具的上限，防的是失误不是恶意
+
+# 与外挂脚本 video2recap 同一句提示词：口径只写一处做不到（脚本不进包），
+# 但两边都从需求出发措辞一致，改时记得同步
+_VISION_PROMPT = "用一句话描述这张视频画面：谁在做什么、画面上有什么关键文字。不超过 40 字。"
 
 # 操作台页面：每次请求现读现发，改了 HTML 不用重启服务
 _PAGE_PATH = Path(__file__).with_name("page.html")
@@ -81,6 +92,9 @@ class RecapRequest(BaseModel):
     （选中的字幕文件名，只进历史档案当标签，不参与计算）。
     另有两个视频专有字段：video（POST /upload 返回的服务端路径，先语音
     转写字幕再进流水线）与 language（视频语音语言，空=自动检测）。
+    画面轨四件套：visual（开画面分析，只对视频生效）、frame_interval /
+    max_frames（抽帧密度与成本上限，默认与外挂脚本一致 120 秒 / 200 帧）、
+    vision_model（视觉模型名，留空=同摘要模型；demo 引擎用离线演示描述）。
     这是服务的信任边界，逐字段校验：坏参数回 400，不进流水线。
     """
 
@@ -91,6 +105,10 @@ class RecapRequest(BaseModel):
     srt_name: str | None = None
     video: str | None = None
     language: str | None = None
+    visual: bool = False
+    frame_interval: float = Field(default=120.0, gt=0)
+    max_frames: int = Field(default=200, gt=0)
+    vision_model: str | None = None
     base_url: str | None = None
     api_key: str | None = None
     hours: float = Field(default=3.0, gt=0)
@@ -143,6 +161,10 @@ async def _run_job(
         )
         if not entries:
             raise ValueError("没从文件里识别到任何语音（静音片段或不是音视频文件？）")
+        if request.visual:
+            visual_events = await _visual_events(request, send)
+            if visual_events:
+                entries = merge_tracks(entries, visual_events)
         srt_text = to_srt_text(entries)
     skill = load_skill(request.skill) if request.skill else None
     config: PipelineConfig = build_config(
@@ -186,6 +208,35 @@ async def _run_job(
     finally:
         if store is not None:
             store.close()
+
+
+async def _visual_events(request: "RecapRequest", send) -> list[tuple[float, str]]:
+    """抽帧并逐帧请视觉模型描述；进度按帧推（stage=画面）。
+
+    抽帧是 ffmpeg 的阻塞活放线程池；帧图留在 .vidrecap/frames/ 便于事后核对。
+    """
+    frames_dir = Path(".vidrecap") / "frames" / uuid.uuid4().hex[:8]
+    frames = await asyncio.to_thread(
+        extract_frames, request.video, frames_dir,
+        request.frame_interval, request.max_frames,
+    )
+    if not frames:
+        return []
+    vision = build_vision(
+        request.llm,
+        request.vision_model or request.model,
+        base_url=request.base_url,
+        api_key=request.api_key,
+    )
+    events: list[tuple[float, str]] = []
+    for index, (timestamp, path) in enumerate(frames, start=1):
+        text = " ".join(
+            (await vision.describe_image(path.read_bytes(), _VISION_PROMPT)).split()
+        )
+        if text:  # 空结果丢弃，不让空行污染时间线
+            events.append((timestamp, text))
+        send("progress", {"stage": "画面", "done": index, "total": len(frames)})
+    return events
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -247,6 +298,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(
                 {"message": "srt 路径、srt_text 内联文本与 video 视频文件只能三选一"},
                 status=400,
+            )
+            return
+        if request.visual and request.video is None:
+            self._send_json(
+                {"message": "画面分析（visual）只对视频文件生效，请上传视频"}, status=400
             )
             return
         if not _JOBS.acquire(blocking=False):
@@ -321,6 +377,7 @@ class _Handler(BaseHTTPRequestHandler):
             instruction=request.instruction or "",
             catalog=request.catalog,
             no_correct=request.no_correct,
+            visual=request.visual,
             recap=result.recap,
             stats=result.stats,
         )

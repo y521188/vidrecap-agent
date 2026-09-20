@@ -181,6 +181,9 @@ vidrecap/external/adapters/openai/__init__.py
 vidrecap/external/adapters/openai/llm.py
 vidrecap/external/adapters/whisper/__init__.py
 vidrecap/external/adapters/whisper/transcribe.py
+vidrecap/external/adapters/visual/__init__.py
+vidrecap/external/adapters/visual/frames.py
+vidrecap/external/adapters/visual/describe.py
 vidrecap/monitor/__init__.py
 vidrecap/monitor/api/__init__.py
 vidrecap/monitor/evals/__init__.py
@@ -235,10 +238,13 @@ HTTP 服务化外壳 `vidrecap serve`——GET `/` 自带浏览器操作台
 `user/server/page.html`：页面上选字幕、填钥匙、看进度；
 **视频/音频直传分析**（`POST /upload` 收文件、faster-whisper 可选装配转字幕、
 `--whisper-model` 选档、`--no-whisper` 关闭）；
+**画面轨**（`visual` 适配器：ffmpeg 抽帧——系统 ffmpeg 或 imageio-ffmpeg 二选一、
+画面行带 `〖画面〗` 前缀并入字幕轨、离线演示描述器零 Key 可跑、真实描述走
+OpenAI 兼容视觉模型）；
 成功任务自动进历史档案（`data/history.py`，默认 `.vidrecap/history.jsonl`，
 `--no-history` 可关），操作台历史区列表回看、点详情取单条概括）。
 
-ROADMAP 的提交 1–14 全部完成，仓库内不再有 `raise NotImplementedError` 骨架。
+ROADMAP 的提交 1–15 全部完成，仓库内不再有 `raise NotImplementedError` 骨架。
 
 **更远的方向**（gRPC 版服务、监控导出、场景切换加密抽帧、ASR 包内适配器）
 见 [docs/ROADMAP.md](docs/ROADMAP.md) 与 [docs/REUSE.md](docs/REUSE.md)。

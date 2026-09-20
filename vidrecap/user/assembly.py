@@ -14,6 +14,7 @@ from vidrecap.external.api import (
     DemoCorrector,
     DemoLLM,
     DemoSource,
+    DemoVisionDescriber,
     LLMClient,
     MediaSource,
     OpenAICompatibleLLM,
@@ -21,6 +22,7 @@ from vidrecap.external.api import (
     SentenceCorrector,
     SrtSource,
     Transcriber,
+    VisionDescriber,
     WhisperTranscriber,
 )
 from vidrecap.rules.api import HeuristicScorer
@@ -50,6 +52,20 @@ def build_transcriber(model_size: str = "tiny") -> Transcriber:
     服务启动时只造个壳，不拖慢、不强制装。
     """
     return WhisperTranscriber(model_size)
+
+
+def build_vision(
+    kind: str,
+    model: str | None = None,
+    *,
+    base_url: str | None = None,
+    api_key: str | None = None,
+) -> VisionDescriber:
+    """画面描述的选型：demo 引擎配离线演示描述器（零 Key 链路完整），
+    openai 引擎复用 OpenAI 兼容客户端的视觉能力，连接信息与摘要模型同源。"""
+    if kind == "openai":
+        return OpenAICompatibleLLM(model=model, base_url=base_url, api_key=api_key)
+    return DemoVisionDescriber()
 
 
 def build_source(

@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from vidrecap.data.api import HistoryStore, PipelineConfig
+from vidrecap.external.api import VISUAL_PREFIX
 from vidrecap.user.api import RecapRequest, build_server
 from vidrecap.user.assembly import build_llm
 
@@ -296,6 +297,46 @@ def test_video_with_no_speech_reports_error_event():
         events = _stream_events(port, {"video": "silence.mp4"})
     assert events[-1][0] == "error"
     assert "识别到任何语音" in events[-1][1]["message"]
+
+
+def test_visual_without_video_is_400():
+    with _running_server() as port:
+        status, body = _request(port, "POST", "/recap", {"visual": True})
+    assert status == 400
+    assert "视频" in body
+
+
+def test_visual_track_merges_into_recap(tmp_path, monkeypatch):
+    """画面轨：抽帧（打桩免 ffmpeg）→ 演示描述 → 并入字幕，进度带"画面"阶段。"""
+
+    def _fake_extract(video, out_dir, interval, max_frames):
+        out = tmp_path / "frames"
+        out.mkdir(exist_ok=True)
+        paths = []
+        for name in ("f0.jpg", "f1.jpg"):
+            path = out / name
+            path.write_bytes(b"fake-jpeg")
+            paths.append(path)
+        return [(0.0, paths[0]), (3.0, paths[1])]
+
+    monkeypatch.setattr(
+        "vidrecap.user.server.server.extract_frames", _fake_extract
+    )
+    with _running_server(
+        history=HistoryStore(tmp_path / "history.jsonl"), transcriber=_FakeTranscriber()
+    ) as port:
+        events = _stream_events(
+            port, {"video": "demo.mp4", "visual": True, "no_correct": True}
+        )
+        _, history_body = _request(port, "GET", "/history")
+
+    kinds = [kind for kind, _ in events]
+    assert kinds[-1] == "result"
+    assert VISUAL_PREFIX in events[-1][1]["recap"]  # 画面行已并入时间线
+    stages = [data.get("stage") for kind, data in events if kind == "progress"]
+    assert "转写" in stages and "画面" in stages
+    record = json.loads(history_body)["records"][0]
+    assert record["visual"] is True
 
 
 def test_build_llm_passes_connection_through():

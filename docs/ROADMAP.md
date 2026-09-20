@@ -458,13 +458,43 @@ CI 的 Ubuntu 自带）；轨道合并、参数转发、看图消息组装均有
 
 ---
 
+## 提交 15：服务端画面轨——抽帧 + 视觉描述并入时间线 ✅ 已完成
+
+把提交 12 外挂脚本里的 `--visual` 搬进服务端：视频直传时勾"画面分析"，
+ffmpeg 抽帧 → 视觉模型逐帧描述 → 画面行带 `〖画面〗` 前缀并入字幕轨，
+后面的概括流水线零改动复用（与外挂同一套口径：固定间隔抽帧、短时段占位）。
+
+| 文件 | 动作 |
+|---|---|
+| `vidrecap/external/adapters/visual/frames.py` | 新建：`ffmpeg_exe`（系统 ffmpeg → imageio-ffmpeg 兜底 → 报错指路）、`extract_frames`（fps 滤镜均匀抽帧、640px 缩放）、`merge_tracks`（画面行并轨，纯函数） |
+| `vidrecap/external/adapters/visual/describe.py` | 新建：`DemoVisionDescriber`——确定性离线占位（明确标注"离线演示"，不冒充真实画面理解），零 Key 链路完整 |
+| `vidrecap/external/protocols.py` | 增 `VisionDescriber` 插座（`describe_image`）；真实实现复用 `OpenAICompatibleLLM.describe_image`（外部层已有） |
+| `vidrecap/user/server/server.py` | `RecapRequest` 增 `visual/frame_interval/max_frames/vision_model`；转写后抽帧并轨，进度事件 stage="画面"（按帧推）；`visual` 无视频回 400 |
+| `vidrecap/user/assembly.py` | `build_vision`：demo 引擎配演示描述器、openai 引擎复用兼容客户端（连接信息与摘要模型同源） |
+| `vidrecap/user/server/page.html` | 高级选项：画面分析开关 + 视觉模型名；历史行带"画面"标记 |
+| `vidrecap/data/history.py` | `RunRecord.visual` 入档案 |
+| tests | `test_visual.py`（归并/确定性/协议形状/ffmpeg 解析/真实抽帧——无 ffmpeg 环境跳过）；`test_server.py` 补画面轨端到端（抽帧打桩）与 400 路径 |
+
+**边界**
+
+- ffmpeg 同 faster-whisper 一样是**可选装配**（系统版或 imageio-ffmpeg 任一），
+  测试里真实抽帧一条按可用性跳过，CI 不被迫装它；
+- demo 描述器只证明链路，真实画面理解必须配 Key（页面上填视觉模型名即可，
+  如 glm-4v-flash / gpt-4o-mini）；
+- 场景切换加密抽帧（PySceneDetect）仍在远期路线，当前是固定间隔。
+
+**验收**：全库 310 通过、1 跳过（1 条真实抽帧在本机跑、CI 无 ffmpeg 时跳过）；
+真机端到端：sintel.mp4 + 画面分析（demo 描述器）→ 时间线含 `〖画面〗` 行。
+
+---
+
 ## 更远的路线（阶段四及以后，先不展开）
 
 | 功能 | 落哪层 | 说明 |
 |---|---|---|
 | 监控指标导出与告警 | 监控层 | 结构化日志先行 |
 | gRPC 版服务（替换 HTTP 外壳） | 用户层 | 有明确对接方时再引 grpcio，接口契约已稳定 |
-| 场景切换加密抽帧 | 外挂脚本 | 接 PySceneDetect（BSD-3，见 REUSE.md）；服务端画面分析（ffmpeg + 视觉模型）也归此类 |
+| 场景切换加密抽帧 | 外挂脚本 | 接 PySceneDetect（BSD-3，见 REUSE.md）；固定间隔的服务端画面轨已在提交 15 落地，此处是场景感知的密度升级 |
 | ASR 音频直转（包内适配器） | 外部层 | **提交 14 已落地**：faster-whisper 可选装配、服务端视频直转；外挂脚本 `scripts/video2recap.py` 仍保留（带 `--visual` 画面轨） |
 
 每加一项，先确认它属于哪层、是否需要新插座，再补 `AGENTS.md` 的归属表与文件清单。

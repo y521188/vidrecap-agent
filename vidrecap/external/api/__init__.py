@@ -12,6 +12,13 @@ from vidrecap.external.adapters.demo import (
 )
 from vidrecap.external.adapters.openai import OpenAICompatibleLLM
 from vidrecap.external.adapters.srt import SrtSource
+from vidrecap.external.adapters.visual import (
+    DemoVisionDescriber,
+    VISUAL_PREFIX,
+    extract_frames,
+    ffmpeg_exe,
+    merge_tracks,
+)
 from vidrecap.external.adapters.whisper import WhisperTranscriber, to_srt_text
 from vidrecap.external.protocols import (
     ContentCatalog,
@@ -20,6 +27,7 @@ from vidrecap.external.protocols import (
     QualityScorer,
     SentenceCorrector,
     Transcriber,
+    VisionDescriber,
 )
 
 __all__ = [
@@ -28,6 +36,7 @@ __all__ = [
     "DemoCorrector",
     "DemoLLM",
     "DemoSource",
+    "DemoVisionDescriber",
     "LLMClient",
     "MediaSource",
     "OpenAICompatibleLLM",
@@ -35,6 +44,11 @@ __all__ = [
     "SentenceCorrector",
     "SrtSource",
     "Transcriber",
+    "VISUAL_PREFIX",
+    "VisionDescriber",
     "WhisperTranscriber",
+    "extract_frames",
+    "ffmpeg_exe",
+    "merge_tracks",
     "to_srt_text",
 ]
