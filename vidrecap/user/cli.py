@@ -20,6 +20,7 @@ import asyncio
 import sys
 
 from vidrecap.data.api import (
+    HistoryStore,
     PipelineConfig,
     QualityConfig,
     SkillConfig,
@@ -29,7 +30,13 @@ from vidrecap.data.api import (
 from vidrecap.external.api import DemoCatalog
 from vidrecap.monitor.api import EvalReport, baseline_checks, run_eval
 from vidrecap.service.api import ProgressCallback, run_recap
-from vidrecap.user.assembly import build_config, build_llm, build_quality, build_source
+from vidrecap.user.assembly import (
+    build_config,
+    build_llm,
+    build_quality,
+    build_source,
+    build_transcriber,
+)
 from vidrecap.user.server import serve
 from vidrecap.user.skills import load_skill
 
@@ -140,6 +147,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--host", default="127.0.0.1", help="监听地址（默认仅本机；对外请自行加鉴权与反代）"
     )
     serve_parser.add_argument("--port", type=int, default=8080, help="监听端口")
+    serve_parser.add_argument(
+        "--history",
+        default=".vidrecap/history.jsonl",
+        metavar="路径",
+        help="历史档案文件：每次成功的摘要追加进去，操作台可回看（默认 .vidrecap/history.jsonl）",
+    )
+    serve_parser.add_argument(
+        "--no-history", action="store_true", help="不落历史档案（操作台历史区为空）"
+    )
+    serve_parser.add_argument(
+        "--whisper-model",
+        default="tiny",
+        help="视频转写的 faster-whisper 模型档（tiny/base/small/medium，默认 tiny）",
+    )
+    serve_parser.add_argument(
+        "--no-whisper",
+        action="store_true",
+        help="关闭视频入口（页面只收字幕文件；faster-whisper 是可选依赖）",
+    )
     return parser
 
 
@@ -286,7 +312,9 @@ async def run_eval_command(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     if args.command == "serve":
-        serve(args.host, args.port)
+        history = None if args.no_history else HistoryStore(args.history)
+        transcriber = None if args.no_whisper else build_transcriber(args.whisper_model)
+        serve(args.host, args.port, history, transcriber)
         return
     if args.command == "eval":
         sys.exit(asyncio.run(run_eval_command(args)))

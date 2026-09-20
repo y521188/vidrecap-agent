@@ -427,14 +427,45 @@ CI 的 Ubuntu 自带）；轨道合并、参数转发、看图消息组装均有
 
 ---
 
+## 提交 14：操作台三件套——页面、历史记录、视频直传 ✅ 已完成
+
+把提交 13 的"裸 HTTP 外壳"补成上手即用的工具：浏览器里一个单文件操作台，
+跑成功的任务自动归档可回看，视频/音频文件直接选中分析（服务端语音转写字幕）。
+
+| 文件 | 动作 |
+|---|---|
+| `vidrecap/user/server/page.html` | 新建：单文件操作台（零依赖、无构建；双栏布局，右侧历史侧栏）；EventSource 不支持 POST，SSE 用 fetch 流手工分帧 |
+| `serve.bat` / `serve.sh` | 新建：一键启动（必须用项目虚拟环境解释器——系统 python 没装 pydantic） |
+| `vidrecap/data/history.py` | 新建：`RunRecord` + `HistoryStore`——JSONL 追加式任务档案；与 TaskStore 分工：那个是**缓存**（内容寻址、可作废），这个是**档案**（只追加、不参与计算） |
+| `vidrecap/external/adapters/whisper/` | 新建：faster-whisper 适配器（可选依赖、模型延迟加载、`to_srt_text` 纯函数）；`external/protocols.py` 增 `Transcriber` 插座 |
+| `vidrecap/external/adapters/srt/source.py` | `SrtSource` 支持内联文本（`text=`）：操作台的字幕随请求体带来，不落盘 |
+| `vidrecap/user/server/server.py` | `RecapRequest` 增连接信息/内联字幕/视频字段；`GET /history(/{id})` 回看；`POST /upload` 收视频（原始字节 + 文件名消毒，2GB 上限）；带 `video` 先转写再进流水线，进度事件带 `stage`（转写=秒数、摘要=分片数） |
+| `vidrecap/user/assembly.py` | `build_transcriber`；`build_llm` 收页面当场填的连接信息 |
+| `vidrecap/user/cli.py` | serve 新旗标：`--history/--no-history`、`--whisper-model/--no-whisper` |
+| tests | `test_history.py`、`test_whisper.py` 新建；`test_server.py` 补历史/上传/视频/错误路径 |
+
+**边界三条**
+
+1. **faster-whisper 仍是可选依赖**：没装时视频入口明确报错指路，`--no-whisper` 可关——
+   "运行时只依赖 pydantic"的底线不破；
+2. **历史只记成功任务**（失败那次在事件流里已说清）；归档落盘失败不影响已推送的结果；
+3. **画面/人物动作（`--visual`）仍走外挂脚本**：需要 ffmpeg 二进制与视觉模型，
+   服务端暂不接（场景切换加密抽帧见"更远的路线"）。
+
+**验收**：已完成。全库 300 通过、1 跳过；真机端到端：页面选 TTS 合成的 wav →
+上传 → whisper 转写（进度按秒推）→ 摘要 → 历史区自动新增一条；`sintel.mp4`
+（77MB、15 分钟开源短片）经命令行与 `/upload` 接口同链路验证。
+
+---
+
 ## 更远的路线（阶段四及以后，先不展开）
 
 | 功能 | 落哪层 | 说明 |
 |---|---|---|
 | 监控指标导出与告警 | 监控层 | 结构化日志先行 |
 | gRPC 版服务（替换 HTTP 外壳） | 用户层 | 有明确对接方时再引 grpcio，接口契约已稳定 |
-| 场景切换加密抽帧 | 外挂脚本 | 接 PySceneDetect（BSD-3，见 REUSE.md） |
-| ASR 音频直转（包内适配器） | 外部层 | "视频→字幕→概括"已用外挂脚本 `scripts/video2recap.py` 落地；包内适配器暂缓（许可证红线见 docs/REUSE.md） |
+| 场景切换加密抽帧 | 外挂脚本 | 接 PySceneDetect（BSD-3，见 REUSE.md）；服务端画面分析（ffmpeg + 视觉模型）也归此类 |
+| ASR 音频直转（包内适配器） | 外部层 | **提交 14 已落地**：faster-whisper 可选装配、服务端视频直转；外挂脚本 `scripts/video2recap.py` 仍保留（带 `--visual` 画面轨） |
 
 每加一项，先确认它属于哪层、是否需要新插座，再补 `AGENTS.md` 的归属表与文件清单。
 

@@ -20,21 +20,48 @@ from vidrecap.external.api import (
     QualityScorer,
     SentenceCorrector,
     SrtSource,
+    Transcriber,
+    WhisperTranscriber,
 )
 from vidrecap.rules.api import HeuristicScorer
 
 
-def build_llm(kind: str, model: str | None = None) -> LLMClient:
-    """按名字造模型客户端；kind="openai" 缺模型名时由适配器抛 ValueError。"""
+def build_llm(
+    kind: str,
+    model: str | None = None,
+    *,
+    base_url: str | None = None,
+    api_key: str | None = None,
+) -> LLMClient:
+    """按名字造模型客户端；kind="openai" 缺模型名时由适配器抛 ValueError。
+
+    base_url / api_key 是操作台页面上当场填的连接信息，给定时优先于环境变量
+    （适配器自己的回落顺序：参数 → 环境变量）。
+    """
     if kind == "openai":
-        return OpenAICompatibleLLM(model=model)
+        return OpenAICompatibleLLM(model=model, base_url=base_url, api_key=api_key)
     return DemoLLM()
 
 
+def build_transcriber(model_size: str = "tiny") -> Transcriber:
+    """视频入口的语音识别装配；模型延迟加载，装配本身永远是轻的。
+
+    真正缺 faster-whisper 要到第一次转写才报错（带安装指路）——
+    服务启动时只造个壳，不拖慢、不强制装。
+    """
+    return WhisperTranscriber(model_size)
+
+
 def build_source(
-    srt: str | None, hours: float, poison_rate: float = 0.0
+    srt: str | None,
+    hours: float,
+    poison_rate: float = 0.0,
+    *,
+    srt_text: str | None = None,
 ) -> MediaSource:
-    """有字幕文件走真实字幕源，否则用内置模拟数据（可注毒）。"""
+    """有字幕（内联文本优先于文件路径）走真实字幕源，否则用内置模拟数据（可注毒）。"""
+    if srt_text:
+        return SrtSource(text=srt_text)
     if srt:
         return SrtSource(srt)
     return DemoSource(hours=hours, poison_rate=poison_rate)

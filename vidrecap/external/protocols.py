@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Callable, Protocol, runtime_checkable
 
 from vidrecap.data.api import SentenceScore, SpeakerProfile, SubtitleLine
 
@@ -62,6 +62,23 @@ class ContentCatalog(Protocol):
     async def lines(self, start: float, end: float) -> list[SubtitleLine]: ...
 
     async def speaker_profiles(self) -> dict[str, SpeakerProfile]: ...
+
+
+@runtime_checkable
+class Transcriber(Protocol):
+    """媒体转写插座：给视频/音频文件路径，还带时间轴的语音文本。
+
+    语音识别是重依赖（模型文件上百 MB），永远是**可选装配**——
+    没装配时服务端不开放视频入口，而不是装不动就悄悄降级。
+    ``on_progress(已转写秒数, 总秒数)`` 是可选回调，长任务里定期调用以便推进度。
+    """
+
+    def transcribe(
+        self,
+        path: str,
+        language: str | None = None,
+        on_progress: Callable[[float, float], None] | None = None,
+    ) -> list[tuple[float, float, str]]: ...
 
 
 @runtime_checkable

@@ -12,12 +12,14 @@ from vidrecap.external.adapters.demo import (
 )
 from vidrecap.external.adapters.openai import OpenAICompatibleLLM
 from vidrecap.external.adapters.srt import SrtSource
+from vidrecap.external.adapters.whisper import WhisperTranscriber, to_srt_text
 from vidrecap.external.protocols import (
     ContentCatalog,
     LLMClient,
     MediaSource,
     QualityScorer,
     SentenceCorrector,
+    Transcriber,
 )
 
 __all__ = [
@@ -32,4 +34,7 @@ __all__ = [
     "QualityScorer",
     "SentenceCorrector",
     "SrtSource",
+    "Transcriber",
+    "WhisperTranscriber",
+    "to_srt_text",
 ]

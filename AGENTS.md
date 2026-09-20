@@ -74,7 +74,7 @@ Python 与 `python -m vidrecap` 的约定要求它们必须在包根，所以它
 | 插座接口（新增一类外部能力） | 外部层 | `external/protocols.py` |
 | 考卷数据、加载、指标、跑分 | 监控层 | `monitor/evals/`（用例结构留本层 `schemas.py`） |
 | HTTP 服务端（gRPC 待有对接方再换实现） | 用户层 | `user/server/` |
-| 任务持久化、断点续跑 | 数据层 | `data/`（新模块） |
+| 任务持久化、断点续跑、历史记录 | 数据层 | `data/store.py`、`data/history.py` |
 
 ---
 
@@ -141,6 +141,7 @@ vidrecap/user/skills.py
 vidrecap/user/assembly.py
 vidrecap/user/server/__init__.py
 vidrecap/user/server/server.py
+vidrecap/user/server/page.html
 vidrecap/service/__init__.py
 vidrecap/service/api/__init__.py
 vidrecap/service/orchestrator.py
@@ -161,6 +162,7 @@ vidrecap/rules/guardrail.py
 vidrecap/rules/baselines.py
 vidrecap/data/__init__.py
 vidrecap/data/api/__init__.py
+vidrecap/data/history.py
 vidrecap/data/models.py
 vidrecap/data/store.py
 vidrecap/external/__init__.py
@@ -177,6 +179,8 @@ vidrecap/external/adapters/srt/__init__.py
 vidrecap/external/adapters/srt/source.py
 vidrecap/external/adapters/openai/__init__.py
 vidrecap/external/adapters/openai/llm.py
+vidrecap/external/adapters/whisper/__init__.py
+vidrecap/external/adapters/whisper/transcribe.py
 vidrecap/monitor/__init__.py
 vidrecap/monitor/api/__init__.py
 vidrecap/monitor/evals/__init__.py
@@ -227,9 +231,14 @@ vidrecap/monitor/evals/runner.py
 用户自定义提示词 `--instruction`、分片失败重试与降级、断点续跑 `--store`）、
 **阶段三：JD 对齐**（后台目录取数与人物权重 `--catalog`、skill-md 技能文件与
 双重提示词约束 `--skill`、画面与人物动作 `--visual` 抽帧 + 视觉模型、
-HTTP 服务化外壳 `vidrecap serve`）。
+HTTP 服务化外壳 `vidrecap serve`——GET `/` 自带浏览器操作台
+`user/server/page.html`：页面上选字幕、填钥匙、看进度；
+**视频/音频直传分析**（`POST /upload` 收文件、faster-whisper 可选装配转字幕、
+`--whisper-model` 选档、`--no-whisper` 关闭）；
+成功任务自动进历史档案（`data/history.py`，默认 `.vidrecap/history.jsonl`，
+`--no-history` 可关），操作台历史区列表回看、点详情取单条概括）。
 
-ROADMAP 的提交 1–13 全部完成，仓库内不再有 `raise NotImplementedError` 骨架。
+ROADMAP 的提交 1–14 全部完成，仓库内不再有 `raise NotImplementedError` 骨架。
 
 **更远的方向**（gRPC 版服务、监控导出、场景切换加密抽帧、ASR 包内适配器）
 见 [docs/ROADMAP.md](docs/ROADMAP.md) 与 [docs/REUSE.md](docs/REUSE.md)。

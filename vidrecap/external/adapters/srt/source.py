@@ -54,11 +54,22 @@ def parse_srt(text: str) -> list[tuple[float, float, str]]:
 class SrtSource:
     """真实字幕源：实现 external.protocols.MediaSource（形状对上即可，无需继承）。"""
 
-    def __init__(self, path: str | Path) -> None:
-        # utf-8-sig 顺带吃掉 BOM，免得第一块开头混进看不见的字符
-        self._entries = parse_srt(Path(path).read_text(encoding="utf-8-sig"))
+    def __init__(
+        self, path: str | Path | None = None, *, text: str | None = None
+    ) -> None:
+        """字幕从哪来：磁盘文件路径，或请求体里直接带来的文本，二选一。"""
+        if (path is None) == (text is None):
+            raise ValueError("字幕源必须在 path 与 text 里二选一")
+        if text is not None:
+            raw = text
+        else:
+            # utf-8-sig 顺带吃掉 BOM，免得第一块开头混进看不见的字符
+            raw = Path(path).read_text(encoding="utf-8-sig")
+        self._entries = parse_srt(raw)
         if not self._entries:
-            raise ValueError(f"字幕文件里没有可用内容: {path}")
+            raise ValueError(
+                f"字幕里没有可用内容: {path if path is not None else '(内联文本)'}"
+            )
 
     def duration(self) -> float:
         return self._entries[-1][1]

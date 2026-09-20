@@ -1,0 +1,382 @@
+<!doctype html>
+<!-- vidrecap 操作台：单文件、零依赖、无构建步骤，由 vidrecap serve 在 GET / 直接发出。
+     "单文件页面 + 密钥存本机浏览器 + OpenAI 兼容端点"的形态参考了 GitHub 上的
+     xsukax-Custom-OpenAI-WebUI 与 N1xUser/OpenAI-HTML-Client；实现为本项目手写——
+     这里的流式协议是 POST + SSE（EventSource 不支持 POST），用 fetch 流手工解事件。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vidrecap 操作台</title>
+<style>
+  :root { --line: #d8dee4; --bg: #f6f8fa; --accent: #0969da; --bad: #cf222e; --ok: #1a7f37; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px 16px 64px; font-family: system-ui, "Microsoft YaHei", sans-serif;
+         background: var(--bg); color: #1f2328; }
+  main { max-width: 1160px; margin: 0 auto; }
+  /* 双栏：左边跑任务看结果，右边历史侧栏常驻；窄屏退回上下单列 */
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+  .col-main { min-width: 0; }
+  .col-history { position: sticky; top: 16px; max-height: calc(100vh - 32px);
+                 overflow-y: auto; }
+  @media (max-width: 980px) {
+    .layout { grid-template-columns: 1fr; }
+    .col-history { position: static; max-height: none; overflow-y: visible; }
+  }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: #57606a; font-size: 13px; margin: 0 0 20px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #bd3300; margin-right: 6px; }
+  .dot.ok { background: var(--ok); }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  section h2 { font-size: 14px; margin: 0 0 12px; color: #57606a; font-weight: 600; }
+  label { display: block; font-size: 13px; margin: 10px 0 4px; }
+  input[type=text], input[type=password], input[type=number], select, textarea {
+    width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px;
+    background: #fff; color: inherit;
+  }
+  input[type=file] { font-size: 13px; }
+  textarea { min-height: 64px; resize: vertical; }
+  .row { display: flex; gap: 10px; }
+  .row > * { flex: 1; }
+  .check { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-top: 10px; }
+  .check input { width: auto; }
+  .hint { color: #57606a; font-size: 12px; margin: 6px 0 0; }
+  button { width: 100%; padding: 10px; font-size: 15px; border: 0; border-radius: 8px;
+           background: var(--accent); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: wait; }
+  progress { width: 100%; height: 10px; margin-top: 14px; }
+  #progressText { font-size: 12px; color: #57606a; min-height: 16px; margin: 6px 0 0; }
+  #error { display: none; background: #ffebe9; border: 1px solid var(--bad); color: var(--bad);
+           border-radius: 8px; padding: 12px 14px; font-size: 13px; margin-bottom: 16px; white-space: pre-wrap; }
+  #result { display: none; }
+  #recap { white-space: pre-wrap; line-height: 1.7; font-size: 14px; margin: 0; font-family: inherit; }
+  #stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-top: 14px; }
+  .stat { background: var(--bg); border-radius: 6px; padding: 8px 10px; }
+  .stat b { display: block; font-size: 16px; }
+  .stat span { font-size: 12px; color: #57606a; }
+  details summary { cursor: pointer; font-size: 13px; color: #57606a; margin-bottom: 10px; }
+  #historyList { display: grid; gap: 8px; }
+  .hrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+          font-size: 13px; padding: 8px 10px; background: var(--bg); border-radius: 6px; }
+  .hrow .when { color: #57606a; white-space: nowrap; }
+  .hrow .src { font-weight: 600; max-width: 12em; overflow: hidden; text-overflow: ellipsis; }
+  .hrow .meta { color: #57606a; }
+  .hrow button { width: auto; padding: 4px 14px; font-size: 13px; margin-left: auto; }
+  .hdetail { border: 1px solid var(--line); border-top: 0; border-radius: 0 0 6px 6px;
+             padding: 12px 14px; margin-top: -8px; }
+  .hdetail .recap { white-space: pre-wrap; line-height: 1.7; font-size: 14px; margin: 0 0 4px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>vidrecap 视频摘要</h1>
+  <p class="sub"><span class="dot" id="healthDot"></span><span id="healthText">正在连接服务…</span>
+     ｜页面与密钥只在本机流转，服务默认只监听 127.0.0.1</p>
+
+  <div class="layout">
+  <div class="col-main">
+
+  <section>
+    <h2>模型连接</h2>
+    <label>引擎</label>
+    <select id="llm">
+      <option value="openai">真实模型（OpenAI 兼容接口）</option>
+      <option value="demo">内置离线示例（不需要钥匙）</option>
+    </select>
+    <label>服务商预设</label>
+    <select id="preset">
+      <option value="">——选一个自动填——</option>
+      <option data-url="https://api.deepseek.com/v1" data-model="deepseek-chat">DeepSeek</option>
+      <option data-url="https://open.bigmodel.cn/api/paas/v4" data-model="glm-4-flash">智谱 BigModel</option>
+      <option data-url="https://api.openai.com/v1" data-model="gpt-4o-mini">OpenAI</option>
+      <option data-url="http://127.0.0.1:11434/v1" data-model="qwen2.5:7b">本地 Ollama</option>
+    </select>
+    <label>接口地址 base_url</label>
+    <input type="text" id="baseUrl" placeholder="https://api.deepseek.com/v1">
+    <label>API Key</label>
+    <input type="password" id="apiKey" placeholder="sk-…">
+    <label>模型名 model</label>
+    <input type="text" id="model" placeholder="deepseek-chat">
+    <div class="check"><input type="checkbox" id="remember" checked>
+      把 Key 记在这台浏览器的本机存储里（只发给你自己启动的这个服务）</div>
+  </section>
+
+  <section>
+    <h2>内容</h2>
+    <label>字幕文件（.srt / .txt）或视频/音频文件</label>
+    <input type="file" id="srtFile" accept=".srt,.txt,video/*,audio/*,.mkv,.flv,.ts">
+    <p class="hint">选视频/音频：上传后服务端自动语音转文字再概括（需服务端装 faster-whisper）；
+       选 .srt/.txt：直接当字幕用；都不选则用内置示例数据试跑链路。</p>
+    <label>视频语音语言（选了视频/音频才生效）</label>
+    <select id="language">
+      <option value="">自动检测</option>
+      <option value="zh">中文</option>
+      <option value="en">English</option>
+    </select>
+    <label>示例数据模拟时长（小时，仅不选文件时生效）</label>
+    <input type="number" id="hours" value="3" min="0.1" step="0.1">
+  </section>
+
+  <details>
+    <summary>高级选项</summary>
+    <section>
+      <label>自定义指令 instruction（留空用默认提示词）</label>
+      <textarea id="instruction" placeholder="例如：面向产品经理，突出结论与待办"></textarea>
+      <div class="check"><input type="checkbox" id="noCorrect">关闭语义修正回路</div>
+      <div class="check"><input type="checkbox" id="catalog">带人物目录与配角过滤（示例目录）</div>
+      <label>质量阈值 threshold（0~1，留空用默认）</label>
+      <input type="number" id="threshold" min="0" max="1" step="0.05">
+      <label>断点续跑存储目录 store（留空不启用）</label>
+      <input type="text" id="store" placeholder=".vidrecap/run1">
+    </section>
+  </details>
+
+  <button id="go">开始摘要</button>
+  <progress id="bar" value="0" max="100" style="display:none"></progress>
+  <p id="progressText"></p>
+  <div id="error"></div>
+
+  <section id="result">
+    <h2>摘要结果</h2>
+    <pre id="recap"></pre>
+    <div id="stats"></div>
+  </section>
+  </div>
+
+  <aside class="col-history">
+  <section id="historySection">
+    <h2>历史记录</h2>
+    <p class="hint">每次跑成功的摘要自动存进服务端档案（默认 .vidrecap/history.jsonl）。</p>
+    <div id="historyList"></div>
+  </section>
+  </aside>
+  </div>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+
+// —— 预设与记忆：选服务商自动填地址和模型名，Key 存本机 localStorage ——
+$("preset").addEventListener("change", () => {
+  const opt = $("preset").selectedOptions[0];
+  if (opt.dataset.url) { $("baseUrl").value = opt.dataset.url; $("model").value = opt.dataset.model; }
+});
+for (const key of ["baseUrl", "apiKey", "model"]) {
+  const saved = localStorage.getItem("vidrecap." + key);
+  if (saved) $(key).value = saved;
+}
+function syncEngine() {
+  const real = $("llm").value === "openai";
+  for (const id of ["preset", "baseUrl", "apiKey", "model"]) $(id).disabled = !real;
+}
+$("llm").addEventListener("change", syncEngine);
+syncEngine();
+
+// —— 探活：左上角小圆点变绿说明服务在 ——
+fetch("/health").then((r) => r.json()).then(() => {
+  $("healthDot").classList.add("ok");
+  $("healthText").textContent = "服务已连接";
+}).catch(() => { $("healthText").textContent = "连不上服务，确认 vidrecap serve 在运行"; });
+
+// —— 发起任务 ——
+$("go").addEventListener("click", async () => {
+  const file = $("srtFile").files[0];
+  const body = { llm: $("llm").value, hours: parseFloat($("hours").value) || 3.0 };
+  if ($("instruction").value.trim()) body.instruction = $("instruction").value.trim();
+  if ($("noCorrect").checked) body.no_correct = true;
+  if ($("catalog").checked) body.catalog = true;
+  if ($("threshold").value !== "") body.threshold = parseFloat($("threshold").value);
+  if ($("store").value.trim()) body.store = $("store").value.trim();
+  if (body.llm === "openai") {
+    body.base_url = $("baseUrl").value.trim();
+    body.api_key = $("apiKey").value.trim();
+    body.model = $("model").value.trim();
+    if ($("remember").checked) {
+      localStorage.setItem("vidrecap.baseUrl", body.base_url);
+      localStorage.setItem("vidrecap.apiKey", body.api_key);
+      localStorage.setItem("vidrecap.model", body.model);
+    }
+  }
+  if ($("language").value) body.language = $("language").value;
+
+  $("error").style.display = "none";
+  $("result").style.display = "none";
+  $("bar").style.display = "";
+  $("bar").value = 0;
+  $("progressText").textContent = file ? "准备中…" : "任务已提交…";
+  $("go").disabled = true;
+
+  try {
+    if (file && /\.(srt|txt)$/i.test(file.name)) {
+      body.srt_text = await file.text();
+      body.srt_name = file.name;
+    } else if (file) {
+      // 视频/音频：整块字节直传，头里带文件名；回来的是服务端路径
+      $("progressText").textContent = "上传中（" + file.name + "）…";
+      const up = await fetch("/upload", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "X-Filename": encodeURIComponent(file.name),
+        },
+        body: await file.arrayBuffer(),
+      });
+      if (!up.ok) {
+        const detail = await up.json().catch(() => ({}));
+        throw new Error(detail.message || "上传失败 " + up.status);
+      }
+      const uploaded = await up.json();
+      body.video = uploaded.path;
+      body.srt_name = uploaded.name;
+      $("progressText").textContent = "任务已提交…";
+    }
+    const resp = await fetch("/recap", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const detail = await resp.json().catch(() => ({}));
+      throw new Error(detail.message || "服务返回 " + resp.status);
+    }
+    await readEvents(resp);
+  } catch (err) {
+    showError(String(err));
+  } finally {
+    $("go").disabled = false;
+  }
+});
+
+// SSE 解析：服务按 "event: 名字\ndata: JSON\n\n" 分帧推送，
+// EventSource 组件不支持 POST，所以用 fetch 的字节流手工分帧。
+async function readEvents(resp) {
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop();
+    for (const frame of frames) handleEvent(frame);
+  }
+}
+
+function handleEvent(frame) {
+  let event = "message", data = "";
+  for (const line of frame.split("\n")) {
+    if (line.startsWith("event: ")) event = line.slice(7);
+    else if (line.startsWith("data: ")) data = line.slice(6);
+  }
+  if (!data) return;
+  const payload = JSON.parse(data);
+  if (event === "progress") {
+    const pct = payload.total ? Math.round((payload.done * 100) / payload.total) : 0;
+    $("bar").value = pct;
+    // 转写阶段的 done/total 是秒数，摘要阶段是分片数；都按比例画进度条
+    $("progressText").textContent =
+      (payload.stage ? payload.stage : "进度") + " " + payload.done + " / " + payload.total;
+  } else if (event === "result") {
+    $("bar").value = 100;
+    $("progressText").textContent = "完成";
+    $("recap").textContent = payload.recap;
+    renderStats(payload.stats || {});
+    // 结果区由样式表的 #result{display:none} 藏着，清空内联样式只会继续被藏，得显式 block
+    $("result").style.display = "block";
+    loadHistory();  // 新纪录已归档，顺手刷新历史区
+  } else if (event === "error") {
+    showError(payload.message || "任务失败");
+  }
+}
+
+const LABELS = {
+  duration_sec: "字幕时长（秒）", shard_count: "分片数", shard_seconds: "分片长度（秒）",
+  overlap_seconds: "重叠缓冲（秒）", partial_count: "分片摘要数", compression_rounds: "压缩轮数",
+  incremental_at: "增量阈值", chars_in: "输入字数", chars_out: "输出字数",
+  corrected_count: "修正句数", failed_shards: "失败分片", dropped_lines: "丢弃行数",
+  avg_quality: "平均质量分",
+};
+
+// 拼进 innerHTML 的一切用户可见文本先过这道转义：文件名、模型名也可能带 <>
+function esc(value) {
+  const map = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  return String(value).replace(/[&<>"']/g, (ch) => map[ch]);
+}
+
+function statsHtml(stats) {
+  const cells = [];
+  for (const [key, label] of Object.entries(LABELS)) {
+    const value = stats[key];
+    if (value === null || value === undefined) continue;
+    const shown = Array.isArray(value) ? value.map(esc).join("、") : esc(value);
+    cells.push('<div class="stat"><b>' + shown + "</b><span>" + label + "</span></div>");
+  }
+  return cells.join("");
+}
+
+function renderStats(stats) {
+  $("stats").innerHTML = statsHtml(stats);
+}
+
+function showError(message) {
+  $("error").textContent = message;
+  $("error").style.display = "block";  // 同上：样式表藏的元素必须显式 block
+  $("progressText").textContent = "";
+}
+
+// —— 历史记录：成功任务自动归档在服务端，这里列表回看、点详情取正文 ——
+async function loadHistory() {
+  const list = $("historyList");
+  try {
+    const resp = await fetch("/history");
+    if (!resp.ok) throw 0;
+    const data = await resp.json();
+    if (!data.records.length) {
+      list.innerHTML = '<p class="hint">还没有历史记录——跑一次摘要就会出现在这里。</p>';
+      return;
+    }
+    list.innerHTML = data.records.map(rowHtml).join("");
+  } catch {
+    list.innerHTML = '<p class="hint">历史记录读取失败，确认服务在运行。</p>';
+  }
+}
+
+function rowHtml(record) {
+  const when = new Date(record.created_at * 1000).toLocaleString();
+  const source = record.source_name ? esc(record.source_name) : "内置示例";
+  const engine = record.llm === "openai" ? ("模型 " + (esc(record.model) || "openai")) : "离线示例";
+  const minutes = Math.round((record.stats.duration_sec || 0) / 60);
+  return '<div class="hrow" data-id="' + esc(record.id) + '">'
+    + '<span class="when">' + esc(when) + '</span>'
+    + '<span class="src">' + source + '</span>'
+    + '<span class="meta">' + engine + " ｜ " + minutes + " 分钟素材</span>"
+    + '<button type="button">详情</button>'
+    + '</div><div class="hdetail" style="display:none"></div>';
+}
+
+$("historyList").addEventListener("click", async (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  const row = button.closest(".hrow");
+  const panel = row.nextElementSibling;
+  if (panel.style.display === "block") { panel.style.display = "none"; return; }
+  if (!panel.dataset.loaded) {
+    const resp = await fetch("/history/" + encodeURIComponent(row.dataset.id));
+    panel.textContent = resp.ok ? "" : "这条记录读取失败。";
+    if (resp.ok) {
+      const record = await resp.json();
+      panel.innerHTML = '<p class="recap"></p><div class="stats"></div>';
+      panel.querySelector(".recap").textContent = record.recap;
+      panel.querySelector(".stats").innerHTML = statsHtml(record.stats || {});
+      panel.dataset.loaded = "1";
+    }
+  }
+  panel.style.display = "block";
+});
+
+loadHistory();
+</script>
+</body>
+</html>

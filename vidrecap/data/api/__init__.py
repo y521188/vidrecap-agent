@@ -4,6 +4,7 @@
 """
 
 from vidrecap.data.store import TaskStore
+from vidrecap.data.history import HistoryStore, RunRecord
 from vidrecap.data.models import (
     CompressionStep,
     CorrectionPlan,
@@ -26,11 +27,13 @@ __all__ = [
     "CompressionStep",
     "CorrectionPlan",
     "CorrectionTarget",
+    "HistoryStore",
     "PartialSummary",
     "PipelineConfig",
     "QualityConfig",
     "RecapResult",
     "RecapStats",
+    "RunRecord",
     "SentenceScore",
     "Shard",
     "SkillConfig",
