@@ -74,7 +74,7 @@ Python 与 `python -m vidrecap` 的约定要求它们必须在包根，所以它
 | 插座接口（新增一类外部能力） | 外部层 | `external/protocols.py` |
 | 考卷数据、加载、指标、跑分 | 监控层 | `monitor/evals/`（用例结构留本层 `schemas.py`） |
 | HTTP 服务端（gRPC 待有对接方再换实现） | 用户层 | `user/server/` |
-| 任务持久化、断点续跑、历史记录 | 数据层 | `data/store.py`、`data/history.py` |
+| 任务持久化、断点续跑、历史记录 | 数据层 | `data/store.py`、`data/history.py`、`data/jobs.py` |
 
 ---
 
@@ -163,6 +163,7 @@ vidrecap/rules/baselines.py
 vidrecap/data/__init__.py
 vidrecap/data/api/__init__.py
 vidrecap/data/history.py
+vidrecap/data/jobs.py
 vidrecap/data/models.py
 vidrecap/data/store.py
 vidrecap/external/__init__.py

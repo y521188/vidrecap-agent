@@ -298,6 +298,11 @@ async function pollJob(jobId) {
       loadHistory();
       return;
     }
+    if (task.status === "interrupted") {
+      showError(task.error || "任务被服务重启打断，请重新提交");
+      localStorage.removeItem("vidrecap.jobId");
+      return;
+    }
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 }

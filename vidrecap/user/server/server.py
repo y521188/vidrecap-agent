@@ -50,6 +50,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from vidrecap.data.api import (
     HistoryStore,
+    JobStore,
     PipelineConfig,
     RecapResult,
     RunRecord,
@@ -88,6 +89,7 @@ class _Task:
 
     登记簿只存内存（本地工具的体量）；`send` 是交给流水线的进度回调——
     只往登记簿记账，绝不碰任何网络连接，这就是"任务与连接解绑"的落点。
+    配了 JobStore 时写穿到磁盘：服务重启后已完成的任务仍可凭号取结果。
     """
 
     status: str = "running"  # running / done / failed
@@ -95,11 +97,31 @@ class _Task:
     result: dict | None = None
     error: str = ""
     created_at: float = field(default_factory=time.time)
+    job_id: str = ""
+    store: JobStore | None = None
 
     def send(self, event: str, data: dict) -> None:
         with _TASKS_LOCK:
             if event == "progress":
                 self.progress_events.append(data)
+                self.persist()
+
+    def snapshot(self) -> dict:
+        """落盘形态：只留最新进度（全量事件列表是内存里的查账用副本）。"""
+        return {
+            "status": self.status,
+            "progress": self.progress_events[-1] if self.progress_events else None,
+            "result": self.result,
+            "error": self.error,
+            "created_at": self.created_at,
+        }
+
+    def persist(self) -> None:
+        if self.store is not None and self.job_id:
+            try:
+                self.store.save(self.job_id, self.snapshot())
+            except OSError:
+                pass  # 号牌写不进去不致命：内存里的任务照常收尾
 
 
 _TASKS: dict[str, _Task] = {}
@@ -349,10 +371,12 @@ def _run_task_thread(
         result = asyncio.run(_run_job(request, task.send, transcribers, diarizer))
         task.status = "done"
         task.result = {"recap": result.recap, "stats": result.stats.model_dump()}
+        task.persist()
         _archive(history, request, result=result)
     except Exception as exc:  # 任务失败：登记遗言、入档，绝不无声消失
         task.status = "failed"
         task.error = str(exc) or exc.__class__.__name__
+        task.persist()
         _archive(history, request, error=task.error)
     finally:
         _JOBS.release()
@@ -472,13 +496,14 @@ class _Handler(BaseHTTPRequestHandler):
             return
         # 受理制：校验过了就发号，任务搬进后台线程；连接断掉它也照跑
         job_id = uuid.uuid4().hex[:12]
+        task = _Task(job_id=job_id, store=self.server.jobs)
         with _TASKS_LOCK:
-            _TASKS[job_id] = _Task()
+            _TASKS[job_id] = task
         threading.Thread(
             target=_run_task_thread,
             args=(
                 request,
-                _TASKS[job_id],
+                task,
                 self.server.transcribers,
                 self.server.diarizer,
                 self.server.history,
@@ -521,20 +546,30 @@ class _Handler(BaseHTTPRequestHandler):
         self._send_json({"path": str(dest.resolve()), "name": safe_name})
 
     def _send_job(self, job_id: str) -> None:
-        """任务查询口：进度、结果、失败原因都在这里领——连接曾经断过也无所谓。"""
+        """任务查询口：进度、结果、失败原因都在这里领——连接与重启都不影响。"""
+        if not re.fullmatch(r"[0-9a-f]{12}", job_id):
+            self._send_json({"message": "查无此任务"}, status=404)
+            return
         with _TASKS_LOCK:
             task = _TASKS.get(job_id)
-            if task is None:
-                self._send_json({"message": "查无此任务"}, status=404)
-                return
-            payload = {
-                "status": task.status,
-                "progress": task.progress_events[-1] if task.progress_events else None,
-                "progress_events": list(task.progress_events),
-                "result": task.result,
-                "error": task.error,
-            }
-        self._send_json(payload)
+        if task is not None:
+            with _TASKS_LOCK:
+                payload = {
+                    "status": task.status,
+                    "progress": task.progress_events[-1] if task.progress_events else None,
+                    "progress_events": list(task.progress_events),
+                    "result": task.result,
+                    "error": task.error,
+                }
+            self._send_json(payload)
+            return
+        # 内存里没有（服务重启过）：回落查磁盘任务簿
+        snapshot = self.server.jobs.get(job_id) if self.server.jobs else None
+        if snapshot is None:
+            self._send_json({"message": "查无此任务"}, status=404)
+            return
+        snapshot.setdefault("progress_events", [])
+        self._send_json(snapshot)
 
     def _send_json(self, data: dict, status: int = 200) -> None:
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -554,18 +589,22 @@ def build_server(
     history: HistoryStore | None = None,
     transcribers: dict[str, Transcriber] | None = None,
     diarizer: Diarizer | None = None,
+    jobs: JobStore | None = None,
 ) -> ThreadingHTTPServer:
     """造好服务实例但不起线程——测试用它拿随机端口。
 
     history 为 None 时查询接口仍在、恒回空列表；transcribers / diarizer
-    缺席时对应入口直接报错指路（测试默认全部不装配，不落盘、不装模型）。
-    是否启用由调用方（常驻入口 / 命令行）决定。
+    缺席时对应入口直接报错指路；配了 jobs（任务簿）则启动时把上个进程
+    遗留的 running 任务标成 interrupted（重启自愈）。测试默认全不装配。
     """
     server = ThreadingHTTPServer((host, port), _Handler)
     server.daemon_threads = True
     server.history = history
     server.transcribers = transcribers
     server.diarizer = diarizer
+    server.jobs = jobs
+    if jobs is not None:
+        jobs.mark_interrupted()
     return server
 
 
@@ -575,10 +614,16 @@ def serve(
     history: HistoryStore | None = None,
     transcribers: dict[str, Transcriber] | None = None,
     diarizer: Diarizer | None = None,
+    jobs: JobStore | None = None,
 ) -> None:
-    """常驻监听；Ctrl+C 结束。默认只绑本机（不含鉴权，对外请加反代）。"""
+    """常驻监听；Ctrl+C 结束。默认只绑本机（不含鉴权，对外请加反代）。
+
+    任务簿默认落盘（.vidrecap/jobs/）：重启不丢已完成任务的结果。
+    """
+    if jobs is None:
+        jobs = JobStore(Path(".vidrecap") / "jobs")
     server = build_server(
-        host, port, history=history, transcribers=transcribers, diarizer=diarizer
+        host, port, history=history, transcribers=transcribers, diarizer=diarizer, jobs=jobs
     )
     # flush：日志重定向到文件时是块缓冲，启动提示不能憋在缓冲区里
     print(f"vidrecap 服务已启动: http://{host}:{port}", flush=True)

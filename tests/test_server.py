@@ -13,16 +13,18 @@ import time
 from pathlib import Path
 from urllib.parse import quote
 
-from vidrecap.data.api import HistoryStore, PipelineConfig
+from vidrecap.data.api import HistoryStore, JobStore, PipelineConfig
 from vidrecap.external.api import VISUAL_PREFIX
 from vidrecap.user.api import RecapRequest, build_server
 from vidrecap.user.assembly import build_llm
 
 
 @contextlib.contextmanager
-def _running_server(history: HistoryStore | None = None, transcribers=None, diarizer=None):
-    """起在本机回环的临时端口上，用完即关。历史/转写/分人默认不装配，要测就显式传。"""
-    server = build_server("127.0.0.1", 0, history=history, transcribers=transcribers, diarizer=diarizer)
+def _running_server(history: HistoryStore | None = None, transcribers=None, diarizer=None, jobs: JobStore | None = None):
+    """起在本机回环的临时端口上，用完即关。各部件默认不装配，要测就显式传。"""
+    server = build_server(
+        "127.0.0.1", 0, history=history, transcribers=transcribers, diarizer=diarizer, jobs=jobs
+    )
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         yield server.server_address[1]
@@ -248,6 +250,68 @@ def test_unknown_job_is_404():
     with _running_server() as port:
         status, _ = _request(port, "GET", "/jobs/no-such-id")
     assert status == 404
+
+
+def test_job_result_survives_server_restart(tmp_path):
+    """重启自愈（已完成）：同一个任务簿重新起服务，凭号仍能取到结果。"""
+    jobs = JobStore(tmp_path / "jobs")
+
+    def _submit_and_wait(port):
+        connection = _connect(port)
+        try:
+            connection.request(
+                "POST",
+                "/recap",
+                body=json.dumps({"srt_text": _MINI_SRT, "no_correct": True}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            response = connection.getresponse()
+            assert response.status == 202
+            job_id = json.loads(response.read().decode("utf-8"))["job_id"]
+        finally:
+            connection.close()
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            _, body = _request(port, "GET", f"/jobs/{job_id}")
+            task = json.loads(body)
+            if task["status"] in ("done", "failed"):
+                return job_id, task
+            time.sleep(0.05)
+        raise TimeoutError("任务没有在时限内收尾")
+
+    with _running_server(jobs=jobs) as port:
+        job_id, task = _submit_and_wait(port)
+    assert task["status"] == "done"
+
+    # "重启"：同一个任务簿目录重新起一个服务实例
+    with _running_server(jobs=jobs) as port:
+        status, body = _request(port, "GET", f"/jobs/{job_id}")
+    restarted = json.loads(body)
+    assert status == 200
+    assert restarted["status"] == "done"
+    assert restarted["result"]["recap"] == task["result"]["recap"]
+
+
+def test_running_jobs_marked_interrupted_on_restart(tmp_path):
+    """重启自愈（未完成）：上个进程留下的 running 任务标成 interrupted 并指路。"""
+    jobs = JobStore(tmp_path / "jobs")
+    jobs.save("a" * 12, {"status": "running", "progress": {"done": 5, "total": 10}})
+    with _running_server(jobs=jobs) as port:
+        status, body = _request(port, "GET", "/jobs/" + "a" * 12)
+    snapshot = json.loads(body)
+    assert status == 200
+    assert snapshot["status"] == "interrupted"
+    assert "重新提交" in snapshot["error"]
+
+
+def test_malformed_job_id_is_404(tmp_path):
+    """任务号是文件名的一部分：不像号的一律 404，不给路径穿越留门。"""
+    jobs = JobStore(tmp_path / "jobs")
+    with _running_server(jobs=jobs) as port:
+        status, _ = _request(port, "GET", "/jobs/../../secrets")
+        ok_status, _ = _request(port, "GET", "/jobs/" + "a" * 12)
+    assert status == 404
+    assert ok_status == 404  # 合法形状但不存在：同样 404
 
 
 def test_transcription_cache_skips_second_transcribe(tmp_path):
