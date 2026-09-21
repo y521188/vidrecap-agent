@@ -63,3 +63,20 @@ def test_records_survive_process_restart(tmp_path):
     reloaded = HistoryStore(path).get("a")
     assert reloaded is not None
     assert reloaded.recap == "上次的成果"
+
+
+def test_failed_records_roundtrip_with_error(tmp_path):
+    """失败档案：status=failed、error 记原因、stats 为空；成功默认不带这些。"""
+    path = tmp_path / "history.jsonl"
+    store = HistoryStore(path)
+    store.append(_record("ok", 1.0))  # 默认 status=success
+    store.append(
+        RunRecord(id="bad", created_at=2.0, status="failed", error="转写炸了")
+    )
+    ok = store.get("ok")
+    assert ok is not None and ok.status == "success" and ok.error == ""
+    bad = store.get("bad")
+    assert bad is not None
+    assert bad.status == "failed"
+    assert bad.error == "转写炸了"
+    assert bad.stats is None

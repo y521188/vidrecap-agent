@@ -115,6 +115,7 @@ def _decode_mono_16k(path: str | Path):
 
 _SPEECH_PAD_SECONDS = 0.3  # 语音段前后各留一点余量，别把起音/收音掐掉
 _SAMPLE_RATE = 16_000
+_MAX_MINUTES = 30  # 单次说话人分离的时长上限（分钟）：内存守卫，见 diarize 内注释
 
 
 def _padded_spans(
@@ -154,7 +155,11 @@ def _map_concat_time(point: float, mapping: list[tuple[float, float, float]]) ->
 
 
 def _crop_to_spans(samples, spans: list[tuple[float, float]]) -> tuple:
-    """按语音段裁剪样本并拼接；返回 (拼接样本, 段映射表)。"""
+    """按语音段裁剪样本并拼接；返回 (拼接样本, 段映射表)。
+
+    samples 与拼接结果**不要同时长期持有**：长音频下两者相加是内存峰值
+    （1 小时约 460MB），调用方拿到拼接结果后应立刻释放原样本。
+    """
     import numpy as np  # numpy 随 sherpa-onnx 一起装，这里用前才引
 
     chunks = []
@@ -201,7 +206,9 @@ class SherpaDiarizer:
         if speech_spans:
             spans = _padded_spans(speech_spans, limit=len(samples) / _SAMPLE_RATE)
             if spans:
-                samples, mapping = _crop_to_spans(samples, spans)
+                cropped, mapping = _crop_to_spans(samples, spans)
+                del samples  # 长 audio 下两份样本同时在内存是峰值大头，立刻放掉
+                samples = cropped
         if self._pipeline is None:
             segmentation = _ensure_model(
                 _SEGMENTATION_URL, _MODELS_DIR / "pyannote-segmentation-3-0.onnx"
@@ -227,6 +234,16 @@ class SherpaDiarizer:
             if on_progress is not None:
                 on_progress(done, total)
             return 0  # 返回非零会中止，这里永远继续
+
+        # 时长守卫：声纹窗数量随时长线性涨（约 60 窗/分钟），超长音频在
+        # 内存紧张的机器上会被换页拖到不可用（实测 1 小时 / 16GB 机器 25% 处
+        # 进程死亡）。与其被系统暗杀，不如明确指路。
+        duration_minutes = len(samples) / _SAMPLE_RATE / 60
+        if duration_minutes > _MAX_MINUTES:
+            raise ValueError(
+                f"音频 {duration_minutes:.0f} 分钟超出说话人分离的处理上限"
+                f"（{_MAX_MINUTES} 分钟）：超长素材请勿勾选分离，或先分段"
+            )
 
         result = self._pipeline.process(samples, _callback)
         turns: list[tuple[float, float, str]] = []

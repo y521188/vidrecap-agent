@@ -23,7 +23,11 @@ from vidrecap.data.models import RecapStats
 
 
 class RunRecord(BaseModel):
-    """一次成功运行的档案：当时怎么跑的（参数）+ 跑出了什么（概括与统计）。"""
+    """一次运行的档案：当时怎么跑的（参数）+ 跑出了什么（概括与统计）。
+
+    status 有 success / failed 两种：失败任务也入档（recap 为空、error 记
+    原因、stats 为 None）——死了也要留遗书，历史区不再"查无此人"。
+    """
 
     id: str
     created_at: float  # Unix 秒
@@ -36,8 +40,10 @@ class RunRecord(BaseModel):
     no_correct: bool = False
     visual: bool = False
     diarize: bool = False
-    recap: str
-    stats: RecapStats
+    status: str = "success"
+    error: str = ""  # 失败原因；成功为空
+    recap: str = ""
+    stats: RecapStats | None = None
 
 
 class HistoryStore:

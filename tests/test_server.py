@@ -1,13 +1,15 @@
-"""服务化外壳测试：真起服务、真发请求，验证事件流与错误路径。
+"""服务化外壳测试：真起服务、真发请求，验证受理制、任务查询与错误路径。
 
-请求固定连本机回环（主机字面量 127.0.0.1，端口取临时分配值，路径全为字面量），
-不构造任何外部地址；用 http.client 直连是为了能逐行读事件流。
+请求固定连本机回环（主机字面量 127.0.0.1，端口取临时分配值，路径全为字面量）。
+任务的打开方式：POST /recap 受理回 202 + job_id 后**立刻断开连接**，
+再轮询 GET /jobs/<id> 到收尾——每条用例都顺带验证"断连不影响任务"。
 """
 
 import contextlib
 import http.client
 import json
 import threading
+import time
 from pathlib import Path
 from urllib.parse import quote
 
@@ -47,9 +49,8 @@ def _request(port: int, method: str, path: str, payload: dict | None = None):
         connection.close()
 
 
-def _stream_events(port: int, payload: dict) -> list[tuple[str, dict]]:
-    """逐行读事件流，边到边解（验证"边跑边推"的关键就在这里）。"""
-    events: list[tuple[str, dict]] = []
+def _stream_events(port: int, payload: dict, timeout: float = 60.0) -> list[tuple[str, dict]]:
+    """提交任务后**立刻断开连接**，再轮询到收尾（事件序列与旧 SSE 语义一致）。"""
     connection = _connect(port)
     try:
         connection.request(
@@ -59,19 +60,25 @@ def _stream_events(port: int, payload: dict) -> list[tuple[str, dict]]:
             headers={"Content-Type": "application/json"},
         )
         response = connection.getresponse()
-        event = ""
-        while True:
-            raw = response.readline()
-            if not raw:
-                break
-            line = raw.decode("utf-8").rstrip("\n")
-            if line.startswith("event: "):
-                event = line[len("event: ") :]
-            elif line.startswith("data: "):
-                events.append((event, json.loads(line[len("data: ") :])))
-        return events
+        if response.status != 202:
+            raise AssertionError(f"受理应回 202，实际 {response.status}")
+        job_id = json.loads(response.read().decode("utf-8"))["job_id"]
     finally:
-        connection.close()
+        connection.close()  # 刻意马上断开：任务必须在服务端照跑
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        _, body = _request(port, "GET", f"/jobs/{job_id}")
+        task = json.loads(body)
+        events = [("progress", p) for p in task["progress_events"]]
+        if task["status"] == "done":
+            events.append(("result", task["result"]))
+            return events
+        if task["status"] == "failed":
+            events.append(("error", {"message": task["error"]}))
+            return events
+        time.sleep(0.05)
+    raise TimeoutError("任务没有在时限内收尾")
 
 
 def test_health_endpoint():
@@ -197,13 +204,64 @@ def test_history_records_successful_runs(tmp_path):
         assert missing_status == 404
 
 
-def test_failed_runs_are_not_archived(tmp_path):
-    """失败那次用 error 事件说清了，档案里只留成果。"""
+def test_failed_run_is_archived_with_error(tmp_path):
+    """失败也入档（留遗书）：历史区不再"查无此人"。"""
     with _running_server(history=HistoryStore(tmp_path / "history.jsonl")) as port:
         events = _stream_events(port, {"srt_text": "没有时间轴的纯文本"})
         assert events[-1][0] == "error"
         _, body = _request(port, "GET", "/history")
-    assert json.loads(body)["records"] == []
+    record = json.loads(body)["records"][0]
+    assert record["status"] == "failed"
+    assert "时间轴" in record["error"]
+
+
+def test_job_survives_client_disconnect():
+    """受理制的命脉：客户端拿了号就走，任务照跑，回头凭号取结果。"""
+    with _running_server() as port:
+        connection = _connect(port)
+        try:
+            connection.request(
+                "POST",
+                "/recap",
+                body=json.dumps({"hours": 0.2, "no_correct": True}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            response = connection.getresponse()
+            assert response.status == 202
+            job_id = json.loads(response.read().decode("utf-8"))["job_id"]
+        finally:
+            connection.close()  # 马上断开，不做任何轮询
+
+        deadline = time.time() + 30
+        task = None
+        while time.time() < deadline:
+            _, body = _request(port, "GET", f"/jobs/{job_id}")
+            task = json.loads(body)
+            if task["status"] in ("done", "failed"):
+                break
+            time.sleep(0.05)
+    assert task is not None and task["status"] == "done"
+    assert task["result"]["recap"]
+
+
+def test_unknown_job_is_404():
+    with _running_server() as port:
+        status, _ = _request(port, "GET", "/jobs/no-such-id")
+    assert status == 404
+
+
+def test_transcription_cache_skips_second_transcribe(tmp_path):
+    """同一视频重跑：第二次直接吃转写缓存，不再调转写器。"""
+    media = tmp_path / "clip.mp4"
+    media.write_bytes(b"fake-video-bytes")
+    transcriber = _FakeTranscriber()
+    with _running_server(transcribers={"whisper": transcriber}) as port:
+        payload = {"video": str(media), "no_correct": True}
+        first = _stream_events(port, payload)
+        second = _stream_events(port, payload)
+    assert [c[0] for c in transcriber.calls] == [str(media)]
+    assert not any(p.get("cached") for kind, p in first if kind == "progress")
+    assert any(p.get("cached") for kind, p in second if kind == "progress")
 
 
 def test_history_disabled_returns_empty_list():

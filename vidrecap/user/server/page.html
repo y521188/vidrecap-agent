@@ -254,7 +254,10 @@ $("go").addEventListener("click", async () => {
       const detail = await resp.json().catch(() => ({}));
       throw new Error(detail.message || "服务返回 " + resp.status);
     }
-    await readEvents(resp);
+    const { job_id } = await resp.json();
+    localStorage.setItem("vidrecap.jobId", job_id);
+    $("progressText").textContent = "任务已受理（" + job_id + "），刷新页面回来也能接着看";
+    await pollJob(job_id);
   } catch (err) {
     showError(String(err));
   } finally {
@@ -262,46 +265,40 @@ $("go").addEventListener("click", async () => {
   }
 });
 
-// SSE 解析：服务按 "event: 名字\ndata: JSON\n\n" 分帧推送，
-// EventSource 组件不支持 POST，所以用 fetch 的字节流手工分帧。
-async function readEvents(resp) {
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
+// 轮询任务状态直到收尾：任务在服务端后台跑，连接断过、页面刷新过都无所谓
+async function pollJob(jobId) {
   for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const frames = buffer.split("\n\n");
-    buffer = frames.pop();
-    for (const frame of frames) handleEvent(frame);
-  }
-}
-
-function handleEvent(frame) {
-  let event = "message", data = "";
-  for (const line of frame.split("\n")) {
-    if (line.startsWith("event: ")) event = line.slice(7);
-    else if (line.startsWith("data: ")) data = line.slice(6);
-  }
-  if (!data) return;
-  const payload = JSON.parse(data);
-  if (event === "progress") {
-    const pct = payload.total ? Math.round((payload.done * 100) / payload.total) : 0;
-    $("bar").value = pct;
-    // 转写阶段的 done/total 是秒数，摘要阶段是分片数；都按比例画进度条
-    $("progressText").textContent =
-      (payload.stage ? payload.stage : "进度") + " " + payload.done + " / " + payload.total;
-  } else if (event === "result") {
-    $("bar").value = 100;
-    $("progressText").textContent = "完成";
-    $("recap").textContent = payload.recap;
-    renderStats(payload.stats || {});
-    // 结果区由样式表的 #result{display:none} 藏着，清空内联样式只会继续被藏，得显式 block
-    $("result").style.display = "block";
-    loadHistory();  // 新纪录已归档，顺手刷新历史区
-  } else if (event === "error") {
-    showError(payload.message || "任务失败");
+    const resp = await fetch("/jobs/" + jobId);
+    if (resp.status === 404) {
+      localStorage.removeItem("vidrecap.jobId");
+      throw new Error("任务不存在（服务重启会丢内存任务，请重新提交）");
+    }
+    if (!resp.ok) throw new Error("任务查询失败 " + resp.status);
+    const task = await resp.json();
+    if (task.progress) {
+      const p = task.progress;
+      const pct = p.total ? Math.round((p.done * 100) / p.total) : 0;
+      $("bar").value = pct;
+      $("progressText").textContent =
+        (p.stage || "进度") + " " + p.done + " / " + p.total + (p.cached ? "（缓存命中）" : "");
+    }
+    if (task.status === "done") {
+      $("bar").value = 100;
+      $("progressText").textContent = "完成";
+      $("recap").textContent = task.result.recap;
+      renderStats(task.result.stats || {});
+      $("result").style.display = "block";
+      localStorage.removeItem("vidrecap.jobId");
+      loadHistory();
+      return;
+    }
+    if (task.status === "failed") {
+      showError(task.error || "任务失败");
+      localStorage.removeItem("vidrecap.jobId");
+      loadHistory();
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 }
 
@@ -361,8 +358,12 @@ function rowHtml(record) {
   const when = new Date(record.created_at * 1000).toLocaleString();
   const source = record.source_name ? esc(record.source_name) : "内置示例";
   const engine = record.llm === "openai" ? ("模型 " + (esc(record.model) || "openai")) : "离线示例";
-  const minutes = Math.round((record.stats.duration_sec || 0) / 60);
-  const badges = (record.visual ? " ｜ 画面" : "") + (record.diarize ? " ｜ 分人" : "") + (record.no_correct ? "" : " ｜ 修正");
+  const failed = record.status === "failed";
+  const minutes = record.stats ? Math.round((record.stats.duration_sec || 0) / 60) : 0;
+  const badges = (failed ? " ｜ 失败" : "")
+    + (record.visual ? " ｜ 画面" : "")
+    + (record.diarize ? " ｜ 分人" : "")
+    + (record.no_correct ? "" : " ｜ 修正");
   return '<div class="hrow" data-id="' + esc(record.id) + '">'
     + '<span class="when">' + esc(when) + '</span>'
     + '<span class="src">' + source + '</span>'
@@ -382,9 +383,14 @@ $("historyList").addEventListener("click", async (event) => {
     panel.textContent = resp.ok ? "" : "这条记录读取失败。";
     if (resp.ok) {
       const record = await resp.json();
-      panel.innerHTML = '<p class="recap"></p><div class="stats"></div>';
-      panel.querySelector(".recap").textContent = record.recap;
-      panel.querySelector(".stats").innerHTML = statsHtml(record.stats || {});
+      if (record.status === "failed") {
+        panel.innerHTML = '<p class="hint"></p>';
+        panel.querySelector(".hint").textContent = "失败原因：" + (record.error || "未知");
+      } else {
+        panel.innerHTML = '<p class="recap"></p><div class="stats"></div>';
+        panel.querySelector(".recap").textContent = record.recap;
+        panel.querySelector(".stats").innerHTML = statsHtml(record.stats || {});
+      }
       panel.dataset.loaded = "1";
     }
   }
@@ -392,6 +398,17 @@ $("historyList").addEventListener("click", async (event) => {
 });
 
 loadHistory();
+
+// 刷新/断网回来的续接：localStorage 里还有没收尾的任务号，就重新接上看
+const pendingJob = localStorage.getItem("vidrecap.jobId");
+if (pendingJob) {
+  $("bar").style.display = "";
+  $("progressText").textContent = "检测到进行中的任务（" + pendingJob + "），重新接上…";
+  $("go").disabled = true;
+  pollJob(pendingJob)
+    .catch((err) => showError(String(err)))
+    .finally(() => { $("go").disabled = false; });
+}
 </script>
 </body>
 </html>

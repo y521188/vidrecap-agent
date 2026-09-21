@@ -10,13 +10,13 @@
 GET / 直接发一份单文件操作台页面（page.html）：浏览器里选字幕、填钥匙、
 点开始看进度——不用另搭前端，页面与钥匙只在本机流转。
 
-成功的任务自动进历史档案（HistoryStore，数据层）：GET /history 回看列表
-（不带概括正文），GET /history/<id> 取单条详情。历史由常驻入口决定是否
-启用（命令行 --history / --no-history），测试默认不落盘。
+成功的任务（和失败的，带原因）自动进历史档案（HistoryStore，数据层）：
+GET /history 回看列表（不带概括正文），GET /history/<id> 取单条详情。
+历史由常驻入口决定是否启用（命令行 --history / --no-history），测试默认不落盘。
 
-视频/音频直传：POST /upload 收原始字节存进 .vidrecap/uploads/，
-/recap 带 video 路径时先用语音识别（外部层 whisper 适配器，可选装配）
-转成字幕再进流水线——转写进度也走同一个 progress 事件（带 stage 标记）。
+任务走"受理制"：POST /recap 校验通过立即回 202 + job_id，任务在后台线程
+照跑到底——刷新页面、断网、睡眠都不影响它；GET /jobs/<id> 领进度与结果。
+同一视频重复提交时转写直接吃缓存（.vidrecap/uploads/<哈希>.srt）。
 
 为什么先不上 gRPC：服务化的价值在"常驻、被调用、推进度"这个形态，不在协议。
 等有了明确的 gRPC 生态对接方，再按"加依赖先问"换实现——接口契约到那时已稳定，
@@ -33,12 +33,14 @@ GET / 直接发一份单文件操作台页面（page.html）：浏览器里选�
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import sys
 import threading
 import time
 import uuid
+from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Literal
@@ -61,6 +63,7 @@ from vidrecap.external.api import (
     apply_speakers,
     extract_frames,
     merge_tracks,
+    parse_srt,
     to_srt_text,
 )
 from vidrecap.service.api import run_recap
@@ -77,6 +80,46 @@ from vidrecap.user.skills import load_skill
 _MAX_JOBS = 2
 _JOBS = threading.BoundedSemaphore(_MAX_JOBS)
 _MAX_UPLOAD_BYTES = 2 * 1024**3  # 2GB：本地工具的上限，防的是失误不是恶意
+
+
+@dataclass
+class _Task:
+    """一个受理中的摘要任务：进度与结果都记在这里，连接断了也不丢。
+
+    登记簿只存内存（本地工具的体量）；`send` 是交给流水线的进度回调——
+    只往登记簿记账，绝不碰任何网络连接，这就是"任务与连接解绑"的落点。
+    """
+
+    status: str = "running"  # running / done / failed
+    progress_events: list[dict] = field(default_factory=list)
+    result: dict | None = None
+    error: str = ""
+    created_at: float = field(default_factory=time.time)
+
+    def send(self, event: str, data: dict) -> None:
+        with _TASKS_LOCK:
+            if event == "progress":
+                self.progress_events.append(data)
+
+
+_TASKS: dict[str, _Task] = {}
+_TASKS_LOCK = threading.Lock()
+
+_STORE_PATH = Path(".vidrecap") / "tasks" / "shards.sqlite"  # 分片断点续跑的默认库
+
+
+def _transcript_cache_path(video: str | None) -> Path | None:
+    """转写缓存文件路径：按 路径+大小+修改时间 哈希（防同名不同内容）；取不到元数据就不缓存。"""
+    if not video:
+        return None
+    try:
+        stat = Path(video).stat()
+    except OSError:
+        return None
+    key = hashlib.sha256(
+        f"{Path(video).resolve()}\x00{stat.st_size}\x00{stat.st_mtime_ns}".encode()
+    ).hexdigest()[:16]
+    return Path(".vidrecap") / "uploads" / f"{key}.srt"
 
 # 与外挂脚本 video2recap 同一句提示词：口径只写一处做不到（脚本不进包），
 # 但两边都从需求出发措辞一致，改时记得同步
@@ -163,17 +206,32 @@ async def _run_job(
             )
         transcriber = transcribers.get(request.asr) or transcribers["whisper"]
 
-        def _transcribing(done: float, total: float) -> None:
-            send(
-                "progress",
-                {"stage": "转写", "done": round(done, 1), "total": round(total, 1)},
-            )
+        # 转写是最贵的一步（1 小时素材约 7 分钟）：同一视频重跑直接吃缓存，
+        # 分人/画面随后照常叠加——缓存的只是原始字幕，不带说话人与画面行
+        cache_file = _transcript_cache_path(request.video)
+        entries: list[tuple[float, float, str]] | None = None
+        if cache_file is not None and cache_file.exists():
+            srt_text = cache_file.read_text(encoding="utf-8")
+            send("progress", {"stage": "转写", "done": 1, "total": 1, "cached": True})
+        else:
 
-        entries = await asyncio.to_thread(
-            transcriber.transcribe, request.video, request.language, _transcribing
-        )
-        if not entries:
-            raise ValueError("没从文件里识别到任何语音（静音片段或不是音视频文件？）")
+            def _transcribing(done: float, total: float) -> None:
+                send(
+                    "progress",
+                    {"stage": "转写", "done": round(done, 1), "total": round(total, 1)},
+                )
+
+            entries = await asyncio.to_thread(
+                transcriber.transcribe, request.video, request.language, _transcribing
+            )
+            if not entries:
+                raise ValueError("没从文件里识别到任何语音（静音片段或不是音视频文件？）")
+            srt_text = to_srt_text(entries)
+            if cache_file is not None:
+                try:
+                    cache_file.write_text(srt_text, encoding="utf-8")
+                except OSError:
+                    pass  # 缓存写不进去不致命：本次照常跑
         if request.diarize:
             if diarizer is None:
                 raise ValueError(
@@ -186,6 +244,8 @@ async def _run_job(
                     {"stage": "分人", "done": done, "total": max(total, 1)},
                 )
 
+            if entries is None:  # 缓存命中的字幕重新解析出时间段（分人要用）
+                entries = parse_srt(srt_text)
             turns = await asyncio.to_thread(
                 diarizer.diarize,
                 request.video,
@@ -197,7 +257,8 @@ async def _run_job(
             visual_events = await _visual_events(request, send)
             if visual_events:
                 entries = merge_tracks(entries, visual_events)
-        srt_text = to_srt_text(entries)
+        if entries is not None:  # 贴过标签/并过画面轨就重新成文；纯缓存命中保持原文
+            srt_text = to_srt_text(entries)
     skill = load_skill(request.skill) if request.skill else None
     config: PipelineConfig = build_config(
         shard_seconds=request.shard_seconds,
@@ -208,10 +269,13 @@ async def _run_job(
         system_prompt=skill.system_prompt if skill else None,
     )
     scorer, corrector, quality_config = _quality_from(request, skill)
-    store = (
-        TaskStore(request.store, namespace=f"{request.llm}:{request.model or ''}")
-        if request.store
-        else None
+    # 分片断点续跑默认就位（内容寻址，同内容同参数才命中）：
+    # 任务级失败重跑时，已完成的分片不再重复调模型
+    store_path = Path(request.store or str(_STORE_PATH))
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+    store = TaskStore(
+        store_path,
+        namespace=f"{request.llm}:{request.model or ''}",
     )
     try:
         return await run_recap(
@@ -238,8 +302,7 @@ async def _run_job(
             ),
         )
     finally:
-        if store is not None:
-            store.close()
+        store.close()
 
 
 async def _visual_events(request: "RecapRequest", send) -> list[tuple[float, str]]:
@@ -271,6 +334,65 @@ async def _visual_events(request: "RecapRequest", send) -> list[tuple[float, str
     return events
 
 
+def _run_task_thread(
+    request: RecapRequest,
+    task: _Task,
+    transcribers: dict[str, Transcriber] | None,
+    diarizer: Diarizer | None,
+    history: HistoryStore | None,
+) -> None:
+    """后台任务线程：受理后连接随时可以断，这里照跑到底，结果写回登记簿。
+
+    归档也在这里收尾——成功记成果，失败记遗书（历史区不再"查无此人"）。
+    """
+    try:
+        result = asyncio.run(_run_job(request, task.send, transcribers, diarizer))
+        task.status = "done"
+        task.result = {"recap": result.recap, "stats": result.stats.model_dump()}
+        _archive(history, request, result=result)
+    except Exception as exc:  # 任务失败：登记遗言、入档，绝不无声消失
+        task.status = "failed"
+        task.error = str(exc) or exc.__class__.__name__
+        _archive(history, request, error=task.error)
+    finally:
+        _JOBS.release()
+
+
+def _archive(
+    history: HistoryStore | None,
+    request: RecapRequest,
+    *,
+    result: RecapResult | None = None,
+    error: str = "",
+) -> None:
+    """任务进历史档案：成功记成果，失败记原因。落盘失败不影响任务本身。"""
+    if history is None:
+        return
+    record = RunRecord(
+        id=uuid.uuid4().hex[:12],
+        created_at=time.time(),
+        llm=request.llm,
+        model=request.model or "",
+        source_name=request.srt_name
+        or (Path(request.srt).name if request.srt else "")
+        or (Path(request.video).name if request.video else ""),
+        hours=request.hours,
+        instruction=request.instruction or "",
+        catalog=request.catalog,
+        no_correct=request.no_correct,
+        visual=request.visual,
+        diarize=request.diarize,
+        recap=result.recap if result else "",
+        stats=result.stats if result else None,
+        status="success" if result else "failed",
+        error=error,
+    )
+    try:
+        history.append(record)
+    except OSError as exc:
+        print(f"历史落盘失败（任务结果不受影响）: {exc}", file=sys.stderr, flush=True)
+
+
 class _Handler(BaseHTTPRequestHandler):
     # HTTP/1.0 + Connection: close：事件流以连接关闭收尾，不需要 Content-Length
     protocol_version = "HTTP/1.0"
@@ -284,6 +406,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_history_list()
         elif self.path.startswith("/history/"):
             self._send_history_detail(self.path[len("/history/") :])
+        elif self.path.startswith("/jobs/"):
+            self._send_job(self.path[len("/jobs/") :])
         else:
             self._send_json({"message": "未知路径"}, status=404)
 
@@ -346,10 +470,22 @@ class _Handler(BaseHTTPRequestHandler):
         if not _JOBS.acquire(blocking=False):
             self._send_json({"message": f"服务忙（同时最多 {_MAX_JOBS} 个任务），稍后再试"}, status=429)
             return
-        try:
-            self._stream(request)
-        finally:
-            _JOBS.release()
+        # 受理制：校验过了就发号，任务搬进后台线程；连接断掉它也照跑
+        job_id = uuid.uuid4().hex[:12]
+        with _TASKS_LOCK:
+            _TASKS[job_id] = _Task()
+        threading.Thread(
+            target=_run_task_thread,
+            args=(
+                request,
+                _TASKS[job_id],
+                self.server.transcribers,
+                self.server.diarizer,
+                self.server.history,
+            ),
+            daemon=True,
+        ).start()
+        self._send_json({"job_id": job_id}, status=202)
 
     def _receive_upload(self) -> None:
         """原始字节 + X-Filename 头 → 存进 .vidrecap/uploads/，回服务端路径。
@@ -384,53 +520,21 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self._send_json({"path": str(dest.resolve()), "name": safe_name})
 
-    def _stream(self, request: RecapRequest) -> None:
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("Connection", "close")
-        self.end_headers()
-        try:
-            result = asyncio.run(
-                _run_job(request, self._event, self.server.transcribers, self.server.diarizer)
-            )
-        except Exception as exc:
-            self._event("error", {"message": str(exc)})
-            return
-        self._event("result", {"recap": result.recap, "stats": result.stats.model_dump()})
-        self._archive(request, result)
-
-    def _archive(self, request: RecapRequest, result: RecapResult) -> None:
-        """成功任务进历史档案。落盘失败不影响已经推完的结果，只往控制台打日志。"""
-        history: HistoryStore | None = self.server.history
-        if history is None:
-            return
-        record = RunRecord(
-            id=uuid.uuid4().hex[:12],
-            created_at=time.time(),
-            llm=request.llm,
-            model=request.model or "",
-            source_name=request.srt_name
-            or (Path(request.srt).name if request.srt else "")
-            or (Path(request.video).name if request.video else ""),
-            hours=request.hours,
-            instruction=request.instruction or "",
-            catalog=request.catalog,
-            no_correct=request.no_correct,
-            visual=request.visual,
-            diarize=request.diarize,
-            recap=result.recap,
-            stats=result.stats,
-        )
-        try:
-            history.append(record)
-        except OSError as exc:
-            print(f"历史落盘失败（结果不受影响）: {exc}", file=sys.stderr, flush=True)
-
-    def _event(self, event: str, data: dict) -> None:
-        payload = f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-        self.wfile.write(payload.encode("utf-8"))
-        self.wfile.flush()
+    def _send_job(self, job_id: str) -> None:
+        """任务查询口：进度、结果、失败原因都在这里领——连接曾经断过也无所谓。"""
+        with _TASKS_LOCK:
+            task = _TASKS.get(job_id)
+            if task is None:
+                self._send_json({"message": "查无此任务"}, status=404)
+                return
+            payload = {
+                "status": task.status,
+                "progress": task.progress_events[-1] if task.progress_events else None,
+                "progress_events": list(task.progress_events),
+                "result": task.result,
+                "error": task.error,
+            }
+        self._send_json(payload)
 
     def _send_json(self, data: dict, status: int = 200) -> None:
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -480,7 +584,8 @@ def serve(
     print(f"vidrecap 服务已启动: http://{host}:{port}", flush=True)
     print(
         "  GET  /       浏览器操作台：选字幕、填钥匙、点开始看进度\n"
-        "  POST /recap  跑一次摘要，SSE 推 progress / result / error\n"
+        "  POST /recap  受理摘要任务，回 202 + job_id（后台照跑，断连无碍）\n"
+        "  GET  /jobs/<id>  查进度与结果\n"
         "  POST /upload 上传视频/音频（装配了语音识别时 /recap 可带 video 直转）\n"
         "  GET  /health 探活\n"
         "  GET  /history 历史记录列表；/history/<id> 单条详情",
